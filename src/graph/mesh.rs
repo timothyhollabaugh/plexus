@@ -1,5 +1,7 @@
 use itertools::Itertools;
 use num::{Integer, NumCast, Unsigned};
+#[cfg(feature = "serialize-serde")]
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::iter::FromIterator;
@@ -15,13 +17,18 @@ use graph::storage::{EdgeKey, FaceKey, Storage, StorageIter, StorageIterMut, Ver
 use graph::topology::{EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut,
                       OrphanVertexMut, OrphanView, Topological, VertexMut, VertexRef, View};
 
+#[cfg_attr(feature = "serialize-serde", derive(Deserialize, Serialize))]
 #[derivative(Debug, Hash)]
 #[derive(Clone, Derivative)]
 pub struct Vertex<G>
 where
     G: Geometry,
 {
-    #[derivative(Debug = "ignore", Hash = "ignore")] pub geometry: G::Vertex,
+    #[cfg_attr(feature = "serialize-serde", serde(bound(serialize = "G::Vertex: Serialize")))]
+    #[cfg_attr(feature = "serialize-serde",
+               serde(bound(deserialize = "G::Vertex: Deserialize<'de>")))]
+    #[derivative(Debug = "ignore", Hash = "ignore")]
+    pub geometry: G::Vertex,
     pub(super) edge: Option<EdgeKey>,
 }
 
@@ -59,13 +66,18 @@ where
     type Attribute = G::Vertex;
 }
 
+#[cfg_attr(feature = "serialize-serde", derive(Deserialize, Serialize))]
 #[derivative(Debug, Hash)]
 #[derive(Clone, Derivative)]
 pub struct Edge<G>
 where
     G: Geometry,
 {
-    #[derivative(Debug = "ignore", Hash = "ignore")] pub geometry: G::Edge,
+    #[cfg_attr(feature = "serialize-serde", serde(bound(serialize = "G::Edge: Serialize")))]
+    #[cfg_attr(feature = "serialize-serde",
+               serde(bound(deserialize = "G::Edge: Deserialize<'de>")))]
+    #[derivative(Debug = "ignore", Hash = "ignore")]
+    pub geometry: G::Edge,
     pub(super) vertex: VertexKey,
     pub(super) opposite: Option<EdgeKey>,
     pub(super) next: Option<EdgeKey>,
@@ -115,13 +127,18 @@ where
     type Attribute = G::Edge;
 }
 
+#[cfg_attr(feature = "serialize-serde", derive(Deserialize, Serialize))]
 #[derivative(Debug, Hash)]
 #[derive(Clone, Derivative)]
 pub struct Face<G>
 where
     G: Geometry,
 {
-    #[derivative(Debug = "ignore", Hash = "ignore")] pub geometry: G::Face,
+    #[cfg_attr(feature = "serialize-serde", serde(bound(serialize = "G::Face: Serialize")))]
+    #[cfg_attr(feature = "serialize-serde",
+               serde(bound(deserialize = "G::Face: Deserialize<'de>")))]
+    #[derivative(Debug = "ignore", Hash = "ignore")]
+    pub geometry: G::Face,
     pub(super) edge: EdgeKey,
 }
 
@@ -169,12 +186,22 @@ where
 /// manipulate topology and geometry.
 ///
 /// See the module documentation for more details.
+#[cfg_attr(feature = "serialize-serde", derive(Deserialize, Serialize))]
 pub struct Mesh<G = ()>
 where
     G: Geometry,
 {
+    #[cfg_attr(feature = "serialize-serde", serde(bound(serialize = "G::Vertex: Serialize")))]
+    #[cfg_attr(feature = "serialize-serde",
+               serde(bound(deserialize = "G::Vertex: Deserialize<'de>")))]
     pub(super) vertices: Storage<Vertex<G>>,
+    #[cfg_attr(feature = "serialize-serde", serde(bound(serialize = "G::Edge: Serialize")))]
+    #[cfg_attr(feature = "serialize-serde",
+               serde(bound(deserialize = "G::Edge: Deserialize<'de>")))]
     pub(super) edges: Storage<Edge<G>>,
+    #[cfg_attr(feature = "serialize-serde", serde(bound(serialize = "G::Face: Serialize")))]
+    #[cfg_attr(feature = "serialize-serde",
+               serde(bound(deserialize = "G::Face: Deserialize<'de>")))]
     pub(super) faces: Storage<Face<G>>,
 }
 
@@ -783,6 +810,7 @@ where
 mod tests {
     use nalgebra::{Point3, Vector3};
     use num::Zero;
+    use serde_yaml;
 
     use generate::*;
     use geometry::*;
@@ -863,5 +891,23 @@ mod tests {
         for face in mesh.faces() {
             assert_eq!(value, face.geometry);
         }
+    }
+
+    // TODO: Consider using the serde_test crate instead of serde_yaml. Test
+    //       the serialization instead of the result of the transform
+    //       (asserting on the reconstructed mesh).
+    #[test]
+    fn serialize_mesh() {
+        let mesh = Mesh::<Triplet<f32>>::from_raw_buffers(
+            vec![0, 1, 2],
+            vec![(0.0, 1.0, 0.0), (-1.0, -1.0, 0.0), (1.0, -1.0, 0.0)],
+            3,
+        ).unwrap();
+        let yaml = serde_yaml::to_string(&mesh).unwrap();
+        let mesh = serde_yaml::from_str::<Mesh<Triplet<f32>>>(&yaml).unwrap();
+
+        assert_eq!(3, mesh.vertex_count());
+        assert_eq!(3, mesh.edge_count());
+        assert_eq!(1, mesh.face_count());
     }
 }

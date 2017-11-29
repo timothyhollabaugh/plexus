@@ -26,9 +26,11 @@ impl Geometry for () {
     type Face = ();
 }
 
+#[cfg_attr(feature = "serialize-serde", derive(Deserialize, Serialize))]
 #[derive(Copy, Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Duplet<T>(pub T, pub T);
 
+#[cfg_attr(feature = "serialize-serde", derive(Deserialize, Serialize))]
 #[derive(Copy, Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Triplet<T>(pub T, pub T, pub T);
 

@@ -1,5 +1,7 @@
 /// Storage for topological data in a mesh.
 
+#[cfg(feature = "serialize-serde")]
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::hash_map::{Iter, IterMut};
 use std::hash::Hash;
@@ -7,6 +9,7 @@ use std::ops::{Deref, DerefMut};
 
 use graph::topology::Topological;
 
+#[cfg_attr(feature = "serialize-serde", derive(Deserialize, Serialize))]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct Key(u64);
 
@@ -54,6 +57,7 @@ pub trait OpaqueKey: Sized {
     fn to_inner(&self) -> Self::RawKey;
 }
 
+#[cfg_attr(feature = "serialize-serde", derive(Deserialize, Serialize))]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct VertexKey(Key);
 
@@ -72,6 +76,7 @@ impl OpaqueKey for VertexKey {
     }
 }
 
+#[cfg_attr(feature = "serialize-serde", derive(Deserialize, Serialize))]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct EdgeKey(Key, Key);
 
@@ -109,6 +114,7 @@ impl From<(VertexKey, VertexKey)> for EdgeKey {
     }
 }
 
+#[cfg_attr(feature = "serialize-serde", derive(Deserialize, Serialize))]
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct FaceKey(Key);
 
@@ -130,11 +136,21 @@ impl OpaqueKey for FaceKey {
 pub type StorageIter<'a, T> = Iter<'a, <<T as Topological>::Key as OpaqueKey>::RawKey, T>;
 pub type StorageIterMut<'a, T> = IterMut<'a, <<T as Topological>::Key as OpaqueKey>::RawKey, T>;
 
+#[cfg_attr(feature = "serialize-serde", derive(Deserialize, Serialize))]
 pub struct Storage<T>
 where
     T: Topological,
 {
+    #[cfg_attr(feature = "serialize-serde",
+               serde(bound(serialize = "<T::Key as OpaqueKey>::Generator: Serialize")))]
+    #[cfg_attr(feature = "serialize-serde",
+               serde(bound(deserialize = "<T::Key as OpaqueKey>::Generator: Deserialize<'de>")))]
     generator: <<T as Topological>::Key as OpaqueKey>::Generator,
+    #[cfg_attr(feature = "serialize-serde",
+               serde(bound(serialize = "T: Serialize, <T::Key as OpaqueKey>::RawKey: Serialize")))]
+    #[cfg_attr(feature = "serialize-serde",
+               serde(bound(deserialize =
+                   "T: Deserialize<'de>, <T::Key as OpaqueKey>::RawKey: Deserialize<'de>")))]
     hash: HashMap<<<T as Topological>::Key as OpaqueKey>::RawKey, T>,
 }
 

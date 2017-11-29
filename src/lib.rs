@@ -17,6 +17,13 @@ extern crate itertools;
 #[cfg(feature = "geometry-nalgebra")]
 extern crate nalgebra;
 extern crate num;
+#[cfg(feature = "serialize-serde")]
+extern crate serde;
+#[cfg(feature = "serialize-serde")]
+#[macro_use]
+extern crate serde_derive;
+#[cfg(test)]
+extern crate serde_yaml;
 
 pub mod buffer;
 pub mod generate;
