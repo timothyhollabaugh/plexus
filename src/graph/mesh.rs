@@ -779,6 +779,26 @@ where
     }
 }
 
+#[cfg(feature = "serialize-ply")]
+mod feature_serialize_ply {
+    use std::io::Write;
+
+    use geometry::ply::{Encoding, Ply};
+    use super::*;
+
+    impl<G> Mesh<G>
+    where
+        G: Geometry + Ply,
+    {
+        pub fn write_ply<T>(&self, output: &mut T, encoding: Encoding) -> Result<(), ()>
+        where
+            T: Write,
+        {
+            <G as Ply>::write(output, encoding, self)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use nalgebra::{Point3, Vector3};

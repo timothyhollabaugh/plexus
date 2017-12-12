@@ -9,6 +9,7 @@ use num::{self, Num, NumCast};
 
 pub mod convert;
 pub mod ops;
+pub mod ply;
 
 pub trait Attribute: Clone {}
 

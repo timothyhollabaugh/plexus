@@ -17,6 +17,8 @@ extern crate itertools;
 #[cfg(feature = "geometry-nalgebra")]
 extern crate nalgebra;
 extern crate num;
+#[cfg(feature = "serialize-ply")]
+extern crate ply_rs;
 
 pub mod buffer;
 pub mod generate;
