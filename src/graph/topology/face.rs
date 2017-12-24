@@ -235,9 +235,7 @@ where
                 .collect::<Vec<_>>();
             let edges = vertices
                 .perimeter()
-                .map(|((_, a), (_, b))| {
-                    mesh.insert_edge((a, b), G::Edge::default()).unwrap()
-                })
+                .map(|((_, a), (_, b))| mesh.insert_edge((a, b), G::Edge::default()).unwrap())
                 .collect::<Vec<_>>();
             let extrusion = mesh.insert_face(&edges, face).unwrap();
             for ((d, c), (a, b)) in vertices.perimeter() {
@@ -262,16 +260,13 @@ where
         VertexPosition<G>: Add<ScaledFaceNormal<G, T>, Output = VertexPosition<G>> + Clone,
     {
         let translation = self.normal()? * distance;
-        Ok(
-            self.vertices()
-                .map(|vertex| {
-                    let mut geometry = vertex.geometry.clone();
-                    *geometry.as_position_mut() =
-                        geometry.as_position().clone() + translation.clone();
-                    (vertex.key(), geometry)
-                })
-                .collect(),
-        )
+        Ok(self.vertices()
+            .map(|vertex| {
+                let mut geometry = vertex.geometry.clone();
+                *geometry.as_position_mut() = geometry.as_position().clone() + translation.clone();
+                (vertex.key(), geometry)
+            })
+            .collect())
     }
 }
 
@@ -476,9 +471,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         <EdgeCirculator<_, G> as Iterator>::next(&mut self.inner)
-            .map(|edge| {
-                self.inner.face.mesh.edges.get(&edge.key()).unwrap().vertex
-            })
+            .map(|edge| self.inner.face.mesh.edges.get(&edge.key()).unwrap().vertex)
             .map(|vertex| {
                 OrphanVertexView::new(
                     unsafe {
@@ -601,13 +594,12 @@ where
     }
 
     fn next(&mut self) -> Option<FaceKey> {
-        while let Some(edge) = self.inner.next().map(|edge| {
-            self.inner.face.mesh.as_ref().edges.get(&edge).unwrap()
-        }) {
+        while let Some(edge) = self.inner
+            .next()
+            .map(|edge| self.inner.face.mesh.as_ref().edges.get(&edge).unwrap())
+        {
             if let Some(face) = edge.opposite
-                .map(|opposite| {
-                    self.inner.face.mesh.as_ref().edges.get(&opposite).unwrap()
-                })
+                .map(|opposite| self.inner.face.mesh.as_ref().edges.get(&opposite).unwrap())
                 .and_then(|opposite| opposite.face)
             {
                 return Some(face);

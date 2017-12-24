@@ -15,48 +15,54 @@ pub type PropertyMap = DefaultElement;
 pub trait Property: Sized {
     const PLY_TYPE: PropertyType;
 
-    fn read<A>(name: &str, properties: &A) -> Result<Self, ()>
+    fn read<A, N>(name: N, properties: &A) -> Result<Self, ()>
     where
-        A: PropertyAccess;
+        A: PropertyAccess,
+        N: Into<String>;
 
-    fn write<A>(&self, name: &str, properties: &mut A)
+    fn write<A, N>(&self, name: N, properties: &mut A)
     where
-        A: PropertyAccess;
+        A: PropertyAccess,
+        N: Into<String>;
 }
 
 impl Property for f32 {
     const PLY_TYPE: PropertyType = PropertyType::Scalar(ScalarType::Float);
 
-    fn read<A>(name: &str, properties: &A) -> Result<Self, ()>
+    fn read<A, N>(name: N, properties: &A) -> Result<Self, ()>
     where
         A: PropertyAccess,
+        N: Into<String>,
     {
-        properties.get_float(&name.to_owned()).ok_or(())
+        properties.get_float(&name.into()).ok_or(())
     }
 
-    fn write<A>(&self, name: &str, properties: &mut A)
+    fn write<A, N>(&self, name: N, properties: &mut A)
     where
         A: PropertyAccess,
+        N: Into<String>,
     {
-        properties.set_property(name.to_owned(), ply::Property::Float(*self));
+        properties.set_property(name.into(), ply::Property::Float(*self));
     }
 }
 
 impl Property for f64 {
     const PLY_TYPE: PropertyType = PropertyType::Scalar(ScalarType::Double);
 
-    fn read<A>(name: &str, properties: &A) -> Result<Self, ()>
+    fn read<A, N>(name: N, properties: &A) -> Result<Self, ()>
     where
         A: PropertyAccess,
+        N: Into<String>,
     {
-        properties.get_double(&name.to_owned()).ok_or(())
+        properties.get_double(&name.into()).ok_or(())
     }
 
-    fn write<A>(&self, name: &str, properties: &mut A)
+    fn write<A, N>(&self, name: N, properties: &mut A)
     where
         A: PropertyAccess,
+        N: Into<String>,
     {
-        properties.set_property(name.to_owned(), ply::Property::Double(*self));
+        properties.set_property(name.into(), ply::Property::Double(*self));
     }
 }
 
@@ -66,18 +72,21 @@ where
 {
     const PLY_TYPE: PropertyType = T::PLY_TYPE;
 
-    fn read<A>(name: &str, properties: &A) -> Result<Self, ()>
+    fn read<A, N>(name: N, properties: &A) -> Result<Self, ()>
     where
         A: PropertyAccess,
+        N: Into<String>,
     {
-        Ok(Ordered::from_raw_float(
-            <T as Property>::read(name, properties)?,
-        ))
+        Ok(Ordered::from_raw_float(<T as Property>::read(
+            name,
+            properties,
+        )?))
     }
 
-    fn write<A>(&self, name: &str, properties: &mut A)
+    fn write<A, N>(&self, name: N, properties: &mut A)
     where
         A: PropertyAccess,
+        N: Into<String>,
     {
         self.clone().into_raw_float().write(name, properties);
     }
