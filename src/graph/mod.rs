@@ -131,6 +131,8 @@
 //! # }
 //! ```
 
+#[cfg(test)]
+mod annotate;
 mod geometry;
 mod mesh;
 mod mutation;
