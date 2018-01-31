@@ -13,7 +13,7 @@
 // accessor functions MUST yield orphans (or not exist at all).
 
 use geometry::{Attribute, Geometry};
-use graph::Mesh;
+use graph::mesh::{Consistency, Consistent, Mesh};
 use graph::storage::OpaqueKey;
 
 mod edge;
@@ -24,16 +24,16 @@ pub use self::edge::{EdgeKeyTopology, EdgeView, OrphanEdgeView};
 pub use self::face::{FaceKeyTopology, FaceView, OrphanFaceView};
 pub use self::vertex::{OrphanVertexView, VertexView};
 
-pub type EdgeRef<'a, G> = EdgeView<&'a Mesh<G>, G>;
-pub type EdgeMut<'a, G> = EdgeView<&'a mut Mesh<G>, G>;
+pub type EdgeRef<'a, G, C = Consistent> = EdgeView<&'a Mesh<G, C>, G, C>;
+pub type EdgeMut<'a, G, C = Consistent> = EdgeView<&'a mut Mesh<G, C>, G, C>;
 pub type OrphanEdgeMut<'a, G> = OrphanEdgeView<'a, G>;
 
-pub type FaceRef<'a, G> = FaceView<&'a Mesh<G>, G>;
-pub type FaceMut<'a, G> = FaceView<&'a mut Mesh<G>, G>;
+pub type FaceRef<'a, G, C = Consistent> = FaceView<&'a Mesh<G, C>, G, C>;
+pub type FaceMut<'a, G, C = Consistent> = FaceView<&'a mut Mesh<G, C>, G, C>;
 pub type OrphanFaceMut<'a, G> = OrphanFaceView<'a, G>;
 
-pub type VertexRef<'a, G> = VertexView<&'a Mesh<G>, G>;
-pub type VertexMut<'a, G> = VertexView<&'a mut Mesh<G>, G>;
+pub type VertexRef<'a, G, C = Consistent> = VertexView<&'a Mesh<G, C>, G, C>;
+pub type VertexMut<'a, G, C = Consistent> = VertexView<&'a mut Mesh<G, C>, G, C>;
 pub type OrphanVertexMut<'a, G> = OrphanVertexView<'a, G>;
 
 pub trait Topological {
@@ -46,10 +46,11 @@ pub trait Topological {
 //       over the instantiation of views, and placing constraints on
 //       `Deref::Target` is not transient.
 
-pub trait View<M, G>
+pub trait View<M, G, C>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
     type Topology: Topological;
 

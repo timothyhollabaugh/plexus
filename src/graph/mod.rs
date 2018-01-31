@@ -137,16 +137,28 @@ mod mutation;
 mod storage;
 mod topology;
 
-pub use self::mesh::Mesh;
+use self::mesh::Consistent;
+
 pub use self::storage::{EdgeKey, FaceKey, VertexKey};
-pub use self::topology::{EdgeKeyTopology, EdgeMut, EdgeRef, FaceKeyTopology, FaceMut, FaceRef,
-                         OrphanEdgeMut, OrphanFaceMut, OrphanVertexMut, VertexMut, VertexRef};
+pub use self::topology::{EdgeKeyTopology, FaceKeyTopology, OrphanEdgeMut, OrphanFaceMut,
+                         OrphanVertexMut};
 
 // TODO: Do not re-export these types. This is only done so that they show up
 //       in documentation. Client code should not interact with these types.
 //       See: https://github.com/rust-lang/rust/issues/39437
 pub use self::topology::{EdgeView, FaceView, OrphanEdgeView, OrphanFaceView, OrphanVertexView,
                          VertexView};
+
+pub type Mesh<G> = self::mesh::Mesh<G, Consistent>;
+
+pub type VertexRef<'a, G> = self::topology::VertexRef<'a, G, Consistent>;
+pub type VertexMut<'a, G> = self::topology::VertexMut<'a, G, Consistent>;
+
+pub type EdgeRef<'a, G> = self::topology::EdgeRef<'a, G, Consistent>;
+pub type EdgeMut<'a, G> = self::topology::EdgeMut<'a, G, Consistent>;
+
+pub type FaceRef<'a, G> = self::topology::FaceRef<'a, G, Consistent>;
+pub type FaceMut<'a, G> = self::topology::FaceMut<'a, G, Consistent>;
 
 #[derive(Debug, Fail)]
 pub enum GraphError {

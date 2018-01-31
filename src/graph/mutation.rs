@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 
 use geometry::Geometry;
 use graph::{GraphError, Mesh, Perimeter};
-use graph::mesh::{Connectivity, Edge, Face, Vertex};
+use graph::mesh::{Connectivity, Consistency, Consistent, Edge, Face, Inconsistent, Vertex};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
 
 enum Mode<I = (), B = ()> {
@@ -13,34 +13,34 @@ enum Mode<I = (), B = ()> {
     Batch(B),
 }
 
-type Mutant<'a, G> = Mode<&'a mut Mesh<G>, Mesh<G>>;
+type Mutant<'a, G> = Mode<&'a mut Mesh<G, Inconsistent>, Mesh<G, Inconsistent>>;
 
 impl<'a, G> Mutant<'a, G>
 where
     G: 'a + Geometry,
 {
-    pub fn get(&self) -> &Mesh<G> {
+    pub fn get(&self) -> &Mesh<G, Inconsistent> {
         match *self {
             Mode::Batch(ref mesh) => mesh,
             Mode::Immediate(ref mesh) => mesh,
         }
     }
 
-    pub fn get_mut(&mut self) -> &mut Mesh<G> {
+    pub fn get_mut(&mut self) -> &mut Mesh<G, Inconsistent> {
         match *self {
             Mode::Batch(ref mut mesh) => mesh,
             Mode::Immediate(ref mut mesh) => mesh,
         }
     }
 
-    pub fn into_immediate(self) -> Option<&'a mut Mesh<G>> {
+    pub fn into_immediate(self) -> Option<&'a mut Mesh<G, Inconsistent>> {
         match self {
             Mode::Immediate(mesh) => Some(mesh),
             _ => None,
         }
     }
 
-    pub fn into_batch(self) -> Option<Mesh<G>> {
+    pub fn into_batch(self) -> Option<Mesh<G, Inconsistent>> {
         match self {
             Mode::Batch(mesh) => Some(mesh),
             _ => None,
@@ -52,7 +52,7 @@ impl<'a, G> Deref for Mutant<'a, G>
 where
     G: 'a + Geometry,
 {
-    type Target = Mesh<G>;
+    type Target = Mesh<G, Inconsistent>;
 
     fn deref(&self) -> &Self::Target {
         self.get()
@@ -100,20 +100,20 @@ impl<'a, G> Mutation<'a, G>
 where
     G: 'a + Geometry,
 {
-    pub fn immediate(mesh: &'a mut Mesh<G>) -> ImmediateMutation<'a, G> {
+    pub fn immediate(mesh: &'a mut Mesh<G, Inconsistent>) -> ImmediateMutation<'a, G> {
         ImmediateMutation::new(Mutation {
             mesh: Mode::Immediate(mesh),
         })
     }
 
-    pub fn batch(mesh: Mesh<G>) -> BatchMutation<'a, G> {
+    pub fn batch(mesh: Mesh<G, Inconsistent>) -> BatchMutation<'a, G> {
         BatchMutation::new(Mutation {
             mesh: Mode::Batch(mesh),
         })
     }
 
-    pub fn replace(mesh: &'a mut Mesh<G>, replacement: Mesh<G>) -> ReplaceMutation<'a, G> {
-        ReplaceMutation::new(mesh, replacement)
+    pub fn replace(mesh: &'a mut Mesh<G, Inconsistent>, replacement: Mesh<G, Consistent>) -> ReplaceMutation<'a, G> {
+        ReplaceMutation::new(mesh, replacement.into_consistency())
     }
 
     pub fn as_mesh(&self) -> &Mesh<G> {

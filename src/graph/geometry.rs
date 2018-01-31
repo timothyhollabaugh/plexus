@@ -10,13 +10,16 @@ use std::ops::{Add, Sub};
 use geometry::Geometry;
 use geometry::convert::AsPosition;
 use geometry::ops::{Average, Cross, Interpolate, Normalize, Project};
+use graph::mesh::Consistent;
 use graph::topology::{EdgeRef, FaceRef};
 use self::alias::*;
+
+// TODO: USE EXPLICIT TYPE PARAMS FOR VIEWS FOR NOW.
 
 pub trait FaceNormal: Geometry {
     type Normal;
 
-    fn normal(face: FaceRef<Self>) -> Result<Self::Normal, Error>;
+    fn normal(face: FaceRef<Self, Consistent>) -> Result<Self::Normal, Error>;
 }
 
 impl<G> FaceNormal for G

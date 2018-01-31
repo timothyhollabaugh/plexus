@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
 use geometry::Geometry;
-use graph::mesh::{Edge, Face, Mesh, Vertex};
+use graph::mesh::{Consistency, Consistent, Edge, Face, Inconsistent, Mesh, Vertex};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
 use graph::topology::{EdgeView, FaceView, OrphanEdgeView, OrphanFaceView, OrphanView, Topological,
                       View};
@@ -12,20 +12,22 @@ use graph::topology::{EdgeView, FaceView, OrphanEdgeView, OrphanFaceView, Orphan
 /// This type is only re-exported so that its members are shown in
 /// documentation. See this issue:
 /// <https://github.com/rust-lang/rust/issues/39437>
-pub struct VertexView<M, G>
+pub struct VertexView<M, G, C = Consistent>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
     mesh: M,
     key: VertexKey,
-    phantom: PhantomData<G>,
+    phantom: PhantomData<(G, C)>,
 }
 
-impl<M, G> VertexView<M, G>
+impl<M, G, C> VertexView<M, G, C>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
     pub(in graph) fn new(mesh: M, vertex: VertexKey) -> Self {
         VertexView {
@@ -39,105 +41,119 @@ where
         self.key
     }
 
-    pub fn outgoing_edge(&self) -> EdgeView<&Mesh<G>, G> {
-        self.raw_outgoing_edge().unwrap()
-    }
-
-    pub fn into_outgoing_edge(self) -> EdgeView<M, G> {
-        self.into_raw_outgoing_edge().unwrap()
-    }
-
-    pub fn incoming_edges(&self) -> EdgeCirculator<&Mesh<G>, G> {
-        EdgeCirculator::new(self.with_mesh_ref())
-    }
-
-    pub fn faces(&self) -> FaceCirculator<&Mesh<G>, G> {
-        FaceCirculator::from_edge_circulator(self.incoming_edges())
-    }
-
     // Resolve the `M` parameter to a concrete reference.
-    fn with_mesh_ref(&self) -> VertexView<&Mesh<G>, G> {
+    fn with_mesh_ref(&self) -> VertexView<&Mesh<G, C>, G, C> {
         VertexView::new(self.mesh.as_ref(), self.key)
     }
 }
 
-/// Raw API.
-impl<M, G> VertexView<M, G>
+impl<M, G, C> VertexView<M, G, C>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, C>> + AsMut<Mesh<G, C>>,
+    G: Geometry,
+    C: Consistency,
+{
+    // Resolve the `M` parameter to a concrete reference.
+    fn with_mesh_mut(&mut self) -> VertexView<&mut Mesh<G, Consistent>, G, Consistent> {
+        VertexView::new(self.mesh.as_mut(), self.key)
+    }
+}
+
+impl<M, G> VertexView<M, G, Consistent>
+where
+    M: AsRef<Mesh<G, Consistent>>,
     G: Geometry,
 {
-    pub(in graph) fn raw_outgoing_edge(&self) -> Option<EdgeView<&Mesh<G>, G>> {
+    pub fn outgoing_edge(&self) -> EdgeView<&Mesh<G, Consistent>, G, Consistent> {
+        unimplemented!()
+    }
+
+    pub fn into_outgoing_edge(self) -> EdgeView<M, G, Consistent> {
+        unimplemented!()
+    }
+
+    pub fn incoming_edges(&self) -> EdgeCirculator<&Mesh<G, Consistent>, G> {
+        EdgeCirculator::new(self.with_mesh_ref())
+    }
+
+    pub fn faces(&self) -> FaceCirculator<&Mesh<G, Consistent>, G> {
+        FaceCirculator::from_edge_circulator(self.incoming_edges())
+    }
+}
+
+impl<M, G> VertexView<M, G, Consistent>
+where
+    M: AsRef<Mesh<G, Consistent>> + AsMut<Mesh<G, Consistent>>,
+    G: Geometry,
+{
+    pub fn outgoing_edge_mut(&mut self) -> OrphanEdgeView<G> {
+        unimplemented!()
+    }
+
+    pub fn incoming_edges_mut(&mut self) -> EdgeCirculator<&mut Mesh<G, Consistent>, G> {
+        EdgeCirculator::new(self.with_mesh_mut())
+    }
+
+    pub fn faces_mut(&mut self) -> FaceCirculator<&mut Mesh<G, Consistent>, G> {
+        FaceCirculator::from_edge_circulator(self.incoming_edges_mut())
+    }
+}
+
+impl<M, G> VertexView<M, G, Inconsistent>
+where
+    M: AsRef<Mesh<G, Inconsistent>>,
+    G: Geometry,
+{
+    pub fn outgoing_edge(&self) -> Option<EdgeView<&Mesh<G, Inconsistent>, G, Inconsistent>> {
         self.edge
             .map(|edge| EdgeView::new(self.mesh.as_ref(), edge))
     }
 
-    pub(in graph) fn into_raw_outgoing_edge(self) -> Option<EdgeView<M, G>> {
+    pub fn into_outgoing_edge(self) -> Option<EdgeView<M, G, Inconsistent>> {
         let edge = self.edge;
         let mesh = self.mesh;
         edge.map(|edge| EdgeView::new(mesh, edge))
     }
 }
 
-impl<M, G> VertexView<M, G>
+impl<M, G> VertexView<M, G, Inconsistent>
 where
-    M: AsRef<Mesh<G>> + AsMut<Mesh<G>>,
+    M: AsRef<Mesh<G, Inconsistent>> + AsMut<Mesh<G, Inconsistent>>,
     G: Geometry,
 {
-    pub fn outgoing_edge_mut(&mut self) -> OrphanEdgeView<G> {
-        self.raw_outgoing_edge_mut().unwrap()
-    }
-
-    pub fn incoming_edges_mut(&mut self) -> EdgeCirculator<&mut Mesh<G>, G> {
-        EdgeCirculator::new(self.with_mesh_mut())
-    }
-
-    pub fn faces_mut(&mut self) -> FaceCirculator<&mut Mesh<G>, G> {
-        FaceCirculator::from_edge_circulator(self.incoming_edges_mut())
-    }
-
-    // Resolve the `M` parameter to a concrete reference.
-    fn with_mesh_mut(&mut self) -> VertexView<&mut Mesh<G>, G> {
-        VertexView::new(self.mesh.as_mut(), self.key)
-    }
-}
-
-/// Raw API.
-impl<M, G> VertexView<M, G>
-where
-    M: AsRef<Mesh<G>> + AsMut<Mesh<G>>,
-    G: Geometry,
-{
-    pub(in graph) fn raw_outgoing_edge_mut(&mut self) -> Option<OrphanEdgeView<G>> {
+    pub fn outgoing_edge_mut(&mut self) -> Option<OrphanEdgeView<G>> {
         let edge = self.edge;
         edge.map(move |edge| self.mesh.as_mut().orphan_edge_mut(edge).unwrap())
     }
 }
 
-impl<M, G> AsRef<VertexView<M, G>> for VertexView<M, G>
+impl<M, G, C> AsRef<VertexView<M, G, C>> for VertexView<M, G, C>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
-    fn as_ref(&self) -> &VertexView<M, G> {
+    fn as_ref(&self) -> &VertexView<M, G, C> {
         self
     }
 }
 
-impl<M, G> AsMut<VertexView<M, G>> for VertexView<M, G>
+impl<M, G, C> AsMut<VertexView<M, G, C>> for VertexView<M, G, C>
 where
-    M: AsRef<Mesh<G>> + AsMut<Mesh<G>>,
+    M: AsRef<Mesh<G, C>> + AsMut<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
-    fn as_mut(&mut self) -> &mut VertexView<M, G> {
+    fn as_mut(&mut self) -> &mut VertexView<M, G, C> {
         self
     }
 }
 
-impl<M, G> Deref for VertexView<M, G>
+impl<M, G, C> Deref for VertexView<M, G, C>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
     type Target = Vertex<G>;
 
@@ -146,20 +162,22 @@ where
     }
 }
 
-impl<M, G> DerefMut for VertexView<M, G>
+impl<M, G, C> DerefMut for VertexView<M, G, C>
 where
-    M: AsRef<Mesh<G>> + AsMut<Mesh<G>>,
+    M: AsRef<Mesh<G, C>> + AsMut<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.mesh.as_mut().vertices.get_mut(&self.key).unwrap()
     }
 }
 
-impl<M, G> Clone for VertexView<M, G>
+impl<M, G, C> Clone for VertexView<M, G, C>
 where
-    M: AsRef<Mesh<G>> + Clone,
+    M: AsRef<Mesh<G, C>> + Clone,
     G: Geometry,
+    C: Consistency,
 {
     fn clone(&self) -> Self {
         VertexView {
@@ -170,17 +188,19 @@ where
     }
 }
 
-impl<M, G> Copy for VertexView<M, G>
+impl<M, G, C> Copy for VertexView<M, G, C>
 where
-    M: AsRef<Mesh<G>> + Copy,
+    M: AsRef<Mesh<G, C>> + Copy,
     G: Geometry,
+    C: Consistency,
 {
 }
 
-impl<M, G> View<M, G> for VertexView<M, G>
+impl<M, G, C> View<M, G, C> for VertexView<M, G, C>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
     type Topology = Vertex<G>;
 
@@ -254,7 +274,7 @@ where
 
 pub struct EdgeCirculator<M, G>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>>,
     G: Geometry,
 {
     vertex: VertexView<M, G>,
@@ -264,7 +284,7 @@ where
 
 impl<M, G> EdgeCirculator<M, G>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>>,
     G: Geometry,
 {
     fn new(vertex: VertexView<M, G>) -> Self {
@@ -295,18 +315,18 @@ where
     }
 }
 
-impl<'a, G> Iterator for EdgeCirculator<&'a Mesh<G>, G>
+impl<'a, G> Iterator for EdgeCirculator<&'a Mesh<G, Consistent>, G>
 where
     G: Geometry,
 {
-    type Item = EdgeView<&'a Mesh<G>, G>;
+    type Item = EdgeView<&'a Mesh<G, Consistent>, G>;
 
     fn next(&mut self) -> Option<Self::Item> {
         <EdgeCirculator<_, _>>::next(self).map(|edge| EdgeView::new(self.vertex.mesh, edge))
     }
 }
 
-impl<'a, G> Iterator for EdgeCirculator<&'a mut Mesh<G>, G>
+impl<'a, G> Iterator for EdgeCirculator<&'a mut Mesh<G, Consistent>, G>
 where
     G: Geometry,
 {
@@ -338,7 +358,7 @@ where
 
 pub struct FaceCirculator<M, G>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>>,
     G: Geometry,
 {
     inner: EdgeCirculator<M, G>,
@@ -346,7 +366,7 @@ where
 
 impl<M, G> FaceCirculator<M, G>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>>,
     G: Geometry,
 {
     fn from_edge_circulator(edges: EdgeCirculator<M, G>) -> Self {
@@ -371,18 +391,18 @@ where
     }
 }
 
-impl<'a, G> Iterator for FaceCirculator<&'a Mesh<G>, G>
+impl<'a, G> Iterator for FaceCirculator<&'a Mesh<G, Consistent>, G>
 where
     G: Geometry,
 {
-    type Item = FaceView<&'a Mesh<G>, G>;
+    type Item = FaceView<&'a Mesh<G, Consistent>, G>;
 
     fn next(&mut self) -> Option<Self::Item> {
         <FaceCirculator<_, _>>::next(self).map(|face| FaceView::new(self.inner.vertex.mesh, face))
     }
 }
 
-impl<'a, G> Iterator for FaceCirculator<&'a mut Mesh<G>, G>
+impl<'a, G> Iterator for FaceCirculator<&'a mut Mesh<G, Consistent>, G>
 where
     G: 'a + Geometry,
 {

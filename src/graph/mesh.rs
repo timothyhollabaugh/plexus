@@ -5,6 +5,7 @@ use num::{Integer, NumCast, Unsigned};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::iter::FromIterator;
+use std::marker::PhantomData;
 
 use BoolExt;
 use buffer::MeshBuffer;
@@ -18,6 +19,14 @@ use graph::mutation::{ModalMutation, Mutation};
 use graph::storage::{EdgeKey, FaceKey, Storage, StorageIter, StorageIterMut, VertexKey};
 use graph::topology::{EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut,
                       OrphanVertexMut, OrphanView, Topological, VertexMut, VertexRef, View};
+
+pub trait Consistency {}
+
+pub struct Consistent;
+pub struct Inconsistent;
+
+impl Consistency for Consistent {}
+impl Consistency for Inconsistent {}
 
 // TODO: derivative panics on `pub(in graph)`, so this type uses `pub(super)`.
 #[derivative(Debug, Hash)]
@@ -200,18 +209,21 @@ pub type Singularity = (VertexKey, Vec<FaceKey>);
 /// manipulate topology and geometry.
 ///
 /// See the module documentation for more details.
-pub struct Mesh<G = ()>
+pub struct Mesh<G = (), C = Consistent>
 where
     G: Geometry,
+    C: Consistency,
 {
     pub(in graph) vertices: Storage<Vertex<G>>,
     pub(in graph) edges: Storage<Edge<G>>,
     pub(in graph) faces: Storage<Face<G>>,
+    phantom: PhantomData<C>,
 }
 
-impl<G> Mesh<G>
+impl<G, C> Mesh<G, C>
 where
     G: Geometry,
+    C: Consistency,
 {
     /// Creates an empty `Mesh`.
     ///
@@ -227,6 +239,7 @@ where
             vertices: Storage::new(),
             edges: Storage::new(),
             faces: Storage::new(),
+            phantom: PhantomData,
         }
     }
 
@@ -239,6 +252,25 @@ where
             vertices: Storage::empty(),
             edges: Storage::empty(),
             faces: Storage::empty(),
+            phantom: PhantomData,
+        }
+    }
+
+    pub(in graph) fn into_consistency<T>(self) -> Mesh<G, T>
+    where
+        T: Consistency,
+    {
+        let Mesh {
+            vertices,
+            edges,
+            faces,
+            ..
+        } = self;
+        Mesh {
+            vertices,
+            edges,
+            faces,
+            phantom: PhantomData,
         }
     }
 
@@ -307,14 +339,14 @@ where
     }
 
     /// Gets an immutable view of the vertex with the given key.
-    pub fn vertex(&self, vertex: VertexKey) -> Option<VertexRef<G>> {
+    pub fn vertex(&self, vertex: VertexKey) -> Option<VertexRef<G, C>> {
         self.vertices
             .get(&vertex)
             .map(|_| VertexRef::new(self, vertex))
     }
 
     /// Gets a mutable view of the vertex with the given key.
-    pub fn vertex_mut(&mut self, vertex: VertexKey) -> Option<VertexMut<G>> {
+    pub fn vertex_mut(&mut self, vertex: VertexKey) -> Option<VertexMut<G, C>> {
         self.vertices
             .contains_key(&vertex)
             .into_some(VertexMut::new(self, vertex))
@@ -327,7 +359,7 @@ where
     }
 
     /// Gets an iterator of immutable views over the vertices in the mesh.
-    pub fn vertices(&self) -> MeshIter<VertexRef<G>, G> {
+    pub fn vertices(&self) -> MeshIter<VertexRef<G, C>, G, C> {
         MeshIter::new(self, self.vertices.iter())
     }
 
@@ -336,7 +368,7 @@ where
     /// Because this only yields orphan views, only geometry can be mutated.
     /// For topological mutations, collect the necessary keys and use
     /// `vertex_mut` instead.
-    pub fn vertices_mut(&mut self) -> MeshIterMut<OrphanVertexMut<G>, G> {
+    pub fn vertices_mut(&mut self) -> MeshIterMut<OrphanVertexMut<G>, G, C> {
         MeshIterMut::new(self.vertices.iter_mut())
     }
 
@@ -346,12 +378,12 @@ where
     }
 
     /// Gets an immutable view of the edge with the given key.
-    pub fn edge(&self, edge: EdgeKey) -> Option<EdgeRef<G>> {
+    pub fn edge(&self, edge: EdgeKey) -> Option<EdgeRef<G, C>> {
         self.edges.get(&edge).map(|_| EdgeRef::new(self, edge))
     }
 
     /// Gets a mutable view of the edge with the given key.
-    pub fn edge_mut(&mut self, edge: EdgeKey) -> Option<EdgeMut<G>> {
+    pub fn edge_mut(&mut self, edge: EdgeKey) -> Option<EdgeMut<G, C>> {
         self.edges
             .contains_key(&edge)
             .into_some(EdgeMut::new(self, edge))
@@ -364,7 +396,7 @@ where
     }
 
     /// Gets an iterator of immutable views over the edges in the mesh.
-    pub fn edges(&self) -> MeshIter<EdgeRef<G>, G> {
+    pub fn edges(&self) -> MeshIter<EdgeRef<G, C>, G, C> {
         MeshIter::new(self, self.edges.iter())
     }
 
@@ -373,7 +405,7 @@ where
     /// Because this only yields orphan views, only geometry can be mutated.
     /// For topological mutations, collect the necessary keys and use
     /// `edge_mut` instead.
-    pub fn edges_mut(&mut self) -> MeshIterMut<OrphanEdgeMut<G>, G> {
+    pub fn edges_mut(&mut self) -> MeshIterMut<OrphanEdgeMut<G>, G, C> {
         MeshIterMut::new(self.edges.iter_mut())
     }
 
@@ -383,12 +415,12 @@ where
     }
 
     /// Gets an immutable view of the face with the given key.
-    pub fn face(&self, face: FaceKey) -> Option<FaceRef<G>> {
+    pub fn face(&self, face: FaceKey) -> Option<FaceRef<G, C>> {
         self.faces.get(&face).map(|_| FaceRef::new(self, face))
     }
 
     /// Gets a mutable view of the face with the given key.
-    pub fn face_mut(&mut self, face: FaceKey) -> Option<FaceMut<G>> {
+    pub fn face_mut(&mut self, face: FaceKey) -> Option<FaceMut<G, C>> {
         self.faces
             .contains_key(&face)
             .into_some(FaceMut::new(self, face))
@@ -401,7 +433,7 @@ where
     }
 
     /// Gets an iterator of immutable views over the faces in the mesh.
-    pub fn faces(&self) -> MeshIter<FaceRef<G>, G> {
+    pub fn faces(&self) -> MeshIter<FaceRef<G, C>, G, C> {
         MeshIter::new(self, self.faces.iter())
     }
 
@@ -410,7 +442,7 @@ where
     /// Because this only yields orphan views, only geometry can be mutated.
     /// For topological mutations, collect the necessary keys and use
     /// `face_mut` instead.
-    pub fn faces_mut(&mut self) -> MeshIterMut<OrphanFaceMut<G>, G> {
+    pub fn faces_mut(&mut self) -> MeshIterMut<OrphanFaceMut<G>, G, C> {
         MeshIterMut::new(self.faces.iter_mut())
     }
 
@@ -461,7 +493,7 @@ where
     ) -> Result<MeshBuffer<N, V>, Error>
     where
         N: Copy + Integer + NumCast + Unsigned,
-        F: FnMut(VertexRef<G>) -> V,
+        F: FnMut(VertexRef<G, C>) -> V,
     {
         let (keys, vertices) = {
             let mut keys = HashMap::with_capacity(self.vertex_count());
@@ -520,7 +552,7 @@ where
     pub fn to_mesh_buffer_by_face_with<N, V, F>(&self, mut f: F) -> Result<MeshBuffer<N, V>, Error>
     where
         N: Copy + Integer + NumCast + Unsigned,
-        F: FnMut(FaceRef<G>, VertexRef<G>) -> V,
+        F: FnMut(FaceRef<G, C>, VertexRef<G, C>) -> V,
     {
         let vertices = {
             let arity = match self.faces().nth(0) {
@@ -642,56 +674,62 @@ where
     }
 }
 
-impl<G> AsRef<Mesh<G>> for Mesh<G>
+impl<G, C> AsRef<Mesh<G, C>> for Mesh<G, C>
 where
     G: Geometry,
+    C: Consistency,
 {
     fn as_ref(&self) -> &Self {
         self
     }
 }
 
-impl<G> AsMut<Mesh<G>> for Mesh<G>
+impl<G, C> AsMut<Mesh<G, C>> for Mesh<G, C>
 where
     G: Geometry,
+    C: Consistency,
 {
     fn as_mut(&mut self) -> &mut Self {
         self
     }
 }
 
-impl<G> Default for Mesh<G>
+impl<G, C> Default for Mesh<G, C>
 where
     G: Geometry,
+    C: Consistency,
 {
     fn default() -> Self {
         Mesh::new()
     }
 }
 
-impl<G, H> FromInteriorGeometry<Mesh<H>> for Mesh<G>
+impl<G1, G2, C> FromInteriorGeometry<Mesh<G2, C>> for Mesh<G1, C>
 where
-    G: Geometry,
-    G::Vertex: FromGeometry<H::Vertex>,
-    G::Edge: FromGeometry<H::Edge>,
-    G::Face: FromGeometry<H::Face>,
-    H: Geometry,
+    G1: Geometry,
+    G1::Vertex: FromGeometry<G2::Vertex>,
+    G1::Edge: FromGeometry<G2::Edge>,
+    G1::Face: FromGeometry<G2::Face>,
+    G2: Geometry,
+    C: Consistency,
 {
-    fn from_interior_geometry(mesh: Mesh<H>) -> Self {
+    fn from_interior_geometry(mesh: Mesh<G2, C>) -> Self {
         let Mesh {
             vertices,
             edges,
             faces,
+            ..
         } = mesh;
         Mesh {
             vertices: vertices.map_values_into(|vertex| vertex.into_interior_geometry()),
             edges: edges.map_values_into(|edge| edge.into_interior_geometry()),
             faces: faces.map_values_into(|face| face.into_interior_geometry()),
+            phantom: PhantomData,
         }
     }
 }
 
-impl<G, P> FromIndexer<P, P> for Mesh<G>
+impl<G, P> FromIndexer<P, P> for Mesh<G, Consistent>
 where
     G: Geometry,
     P: MapVerticesInto<usize> + generate::Topological,
@@ -726,7 +764,7 @@ where
     }
 }
 
-impl<G, P> FromIterator<P> for Mesh<G>
+impl<G, P> FromIterator<P> for Mesh<G, Consistent>
 where
     G: Geometry,
     P: MapVerticesInto<usize> + generate::Topological,
@@ -742,33 +780,38 @@ where
     }
 }
 
-pub struct MeshIter<'a, T, G>
+pub struct MeshIter<'a, T, G, C>
 where
-    T: 'a + View<&'a Mesh<G>, G>,
+    T: 'a + View<&'a Mesh<G, C>, G, C>,
     T::Topology: 'a,
     G: 'a + Geometry,
+    C: 'a + Consistency,
 {
-    mesh: &'a Mesh<G>,
+    mesh: &'a Mesh<G, C>,
     input: StorageIter<'a, T::Topology>,
+    phantom: PhantomData<C>,
 }
 
-impl<'a, T, G> MeshIter<'a, T, G>
+impl<'a, T, G, C> MeshIter<'a, T, G, C>
 where
-    T: View<&'a Mesh<G>, G>,
+    T: View<&'a Mesh<G, C>, G, C>,
     G: Geometry,
+    C: Consistency,
 {
     fn new(mesh: &'a Mesh<G>, input: StorageIter<'a, T::Topology>) -> Self {
         MeshIter {
             mesh: mesh,
             input: input,
+            phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T, G> Iterator for MeshIter<'a, T, G>
+impl<'a, T, G, C> Iterator for MeshIter<'a, T, G, C>
 where
-    T: View<&'a Mesh<G>, G>,
+    T: View<&'a Mesh<G, C>, G, C>,
     G: Geometry,
+    C: Consistency,
 {
     type Item = T;
 
@@ -779,28 +822,35 @@ where
     }
 }
 
-pub struct MeshIterMut<'a, T, G>
+pub struct MeshIterMut<'a, T, G, C>
 where
     T: 'a + OrphanView<'a, G>,
     G: 'a + Geometry,
+    C: Consistency,
 {
     input: StorageIterMut<'a, T::Topology>,
+    phantom: PhantomData<C>,
 }
 
-impl<'a, T, G> MeshIterMut<'a, T, G>
+impl<'a, T, G, C> MeshIterMut<'a, T, G, C>
 where
     T: OrphanView<'a, G>,
     G: Geometry,
+    C: Consistency,
 {
     fn new(input: StorageIterMut<'a, T::Topology>) -> Self {
-        MeshIterMut { input: input }
+        MeshIterMut {
+            input,
+            phantom: PhantomData,
+        }
     }
 }
 
-impl<'a, T, G> Iterator for MeshIterMut<'a, T, G>
+impl<'a, T, G, C> Iterator for MeshIterMut<'a, T, G, C>
 where
     T: OrphanView<'a, G>,
     G: Geometry,
+    C: Consistency,
 {
     type Item = T;
 

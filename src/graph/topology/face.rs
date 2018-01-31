@@ -7,7 +7,7 @@ use geometry::convert::AsPosition;
 use graph::{GraphError, Perimeter};
 use graph::geometry::{FaceCentroid, FaceNormal};
 use graph::geometry::alias::{ScaledFaceNormal, VertexPosition};
-use graph::mesh::{Edge, Face, Mesh, Vertex};
+use graph::mesh::{Consistency, Consistent, Edge, Face, Mesh, Vertex};
 use graph::mutation::{ModalMutation, Mutation};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
 use graph::topology::{edge, EdgeKeyTopology, EdgeView, OrphanEdgeView, OrphanVertexView,
@@ -18,20 +18,22 @@ use graph::topology::{edge, EdgeKeyTopology, EdgeView, OrphanEdgeView, OrphanVer
 /// This type is only re-exported so that its members are shown in
 /// documentation. See this issue:
 /// <https://github.com/rust-lang/rust/issues/39437>
-pub struct FaceView<M, G>
+pub struct FaceView<M, G, C = Consistent>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
     mesh: M,
     key: FaceKey,
-    phantom: PhantomData<G>,
+    phantom: PhantomData<(G, C)>,
 }
 
-impl<M, G> FaceView<M, G>
+impl<M, G, C> FaceView<M, G, C>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
     pub(in graph) fn new(mesh: M, face: FaceKey) -> Self {
         FaceView {
@@ -45,6 +47,29 @@ where
         self.key
     }
 
+    // Resolve the `M` parameter to a concrete reference.
+    fn with_mesh_ref(&self) -> FaceView<&Mesh<G>, G> {
+        FaceView::new(self.mesh.as_ref(), self.key)
+    }
+}
+
+impl<M, G, C> FaceView<M, G, C>
+where
+    M: AsRef<Mesh<G, C>> + AsMut<Mesh<G, C>>,
+    G: Geometry,
+    C: Consistency,
+{
+    // Resolve the `M` parameter to a concrete reference.
+    fn with_mesh_mut(&mut self) -> FaceView<&mut Mesh<G, Consistent>, G> {
+        FaceView::new(self.mesh.as_mut(), self.key)
+    }
+}
+
+impl<M, G> FaceView<M, G, Consistent>
+where
+    M: AsRef<Mesh<G, Consistent>>,
+    G: Geometry,
+{
     pub fn to_key_topology(&self) -> FaceKeyTopology {
         FaceKeyTopology::new(self.key, self.edges().map(|edge| edge.to_key_topology()))
     }
@@ -53,48 +78,38 @@ where
         self.edges().count()
     }
 
-    pub fn vertices(&self) -> VertexCirculator<&Mesh<G>, G> {
+    pub fn vertices(&self) -> VertexCirculator<&Mesh<G, Consistent>, G> {
         VertexCirculator::from_edge_circulator(self.edges())
     }
 
-    pub fn edges(&self) -> EdgeCirculator<&Mesh<G>, G> {
+    pub fn edges(&self) -> EdgeCirculator<&Mesh<G, Consistent>, G> {
         EdgeCirculator::new(self.with_mesh_ref())
     }
 
-    pub fn faces(&self) -> FaceCirculator<&Mesh<G>, G> {
+    pub fn faces(&self) -> FaceCirculator<&Mesh<G, Consistent>, G> {
         FaceCirculator::from_edge_circulator(self.edges())
-    }
-
-    // Resolve the `M` parameter to a concrete reference.
-    fn with_mesh_ref(&self) -> FaceView<&Mesh<G>, G> {
-        FaceView::new(self.mesh.as_ref(), self.key)
     }
 }
 
-impl<M, G> FaceView<M, G>
+impl<M, G> FaceView<M, G, Consistent>
 where
-    M: AsRef<Mesh<G>> + AsMut<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>> + AsMut<Mesh<G, Consistent>>,
     G: Geometry,
 {
-    pub fn vertices_mut(&mut self) -> VertexCirculator<&mut Mesh<G>, G> {
+    pub fn vertices_mut(&mut self) -> VertexCirculator<&mut Mesh<G, Consistent>, G> {
         VertexCirculator::from_edge_circulator(self.edges_mut())
     }
 
-    pub fn edges_mut(&mut self) -> EdgeCirculator<&mut Mesh<G>, G> {
+    pub fn edges_mut(&mut self) -> EdgeCirculator<&mut Mesh<G, Consistent>, G> {
         EdgeCirculator::new(self.with_mesh_mut())
     }
 
-    pub fn faces_mut(&mut self) -> FaceCirculator<&mut Mesh<G>, G> {
+    pub fn faces_mut(&mut self) -> FaceCirculator<&mut Mesh<G, Consistent>, G> {
         FaceCirculator::from_edge_circulator(self.edges_mut())
-    }
-
-    // Resolve the `M` parameter to a concrete reference.
-    fn with_mesh_mut(&mut self) -> FaceView<&mut Mesh<G>, G> {
-        FaceView::new(self.mesh.as_mut(), self.key)
     }
 }
 
-impl<'a, G> FaceView<&'a mut Mesh<G>, G>
+impl<'a, G> FaceView<&'a mut Mesh<G, Consistent>, G, Consistent>
 where
     G: Geometry,
 {
@@ -109,9 +124,9 @@ where
     }
 }
 
-impl<M, G> FaceView<M, G>
+impl<M, G> FaceView<M, G, Consistent>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>>,
     G: FaceCentroid + Geometry,
 {
     pub fn centroid(&self) -> Result<G::Centroid, Error> {
@@ -119,11 +134,13 @@ where
     }
 }
 
-impl<'a, G> FaceView<&'a mut Mesh<G>, G>
+impl<'a, G> FaceView<&'a mut Mesh<G, Consistent>, G, Consistent>
 where
     G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
 {
-    pub fn triangulate(self) -> Result<Option<VertexView<&'a mut Mesh<G>, G>>, Error> {
+    pub fn triangulate(
+        self,
+    ) -> Result<Option<VertexView<&'a mut Mesh<G, Consistent>, G, Consistent>>, Error> {
         let FaceView { mesh, key: abc, .. } = self;
         let mut mutation = Mutation::immediate(mesh);
         Ok(match triangulate(&mut mutation, abc)? {
@@ -133,9 +150,9 @@ where
     }
 }
 
-impl<M, G> FaceView<M, G>
+impl<M, G> FaceView<M, G, Consistent>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>>,
     G: FaceNormal + Geometry,
 {
     pub fn normal(&self) -> Result<G::Normal, Error> {
@@ -143,12 +160,15 @@ where
     }
 }
 
-impl<'a, G> FaceView<&'a mut Mesh<G>, G>
+impl<'a, G> FaceView<&'a mut Mesh<G, Consistent>, G, Consistent>
 where
     G: FaceNormal + Geometry,
     G::Vertex: AsPosition,
 {
-    pub fn extrude<T>(self, distance: T) -> Result<FaceView<&'a mut Mesh<G>, G>, Error>
+    pub fn extrude<T>(
+        self,
+        distance: T,
+    ) -> Result<FaceView<&'a mut Mesh<G, Consistent>, G, Consistent>, Error>
     where
         G::Normal: Mul<T>,
         ScaledFaceNormal<G, T>: Clone,
@@ -161,52 +181,57 @@ where
     }
 }
 
-impl<M, G> AsRef<FaceView<M, G>> for FaceView<M, G>
+impl<M, G, C> AsRef<FaceView<M, G, C>> for FaceView<M, G, C>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
-    fn as_ref(&self) -> &FaceView<M, G> {
+    fn as_ref(&self) -> &FaceView<M, G, C> {
         self
     }
 }
 
-impl<M, G> AsMut<FaceView<M, G>> for FaceView<M, G>
+impl<M, G, C> AsMut<FaceView<M, G, C>> for FaceView<M, G, C>
 where
-    M: AsRef<Mesh<G>> + AsMut<Mesh<G>>,
+    M: AsRef<Mesh<G, C>> + AsMut<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
-    fn as_mut(&mut self) -> &mut FaceView<M, G> {
+    fn as_mut(&mut self) -> &mut FaceView<M, G, C> {
         self
     }
 }
 
-impl<M, G> Deref for FaceView<M, G>
+impl<M, G, C> Deref for FaceView<M, G, C>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
-    type Target = <Self as View<M, G>>::Topology;
+    type Target = <Self as View<M, G, C>>::Topology;
 
     fn deref(&self) -> &Self::Target {
         self.mesh.as_ref().faces.get(&self.key).unwrap()
     }
 }
 
-impl<M, G> DerefMut for FaceView<M, G>
+impl<M, G, C> DerefMut for FaceView<M, G, C>
 where
-    M: AsRef<Mesh<G>> + AsMut<Mesh<G>>,
+    M: AsRef<Mesh<G, C>> + AsMut<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.mesh.as_mut().faces.get_mut(&self.key).unwrap()
     }
 }
 
-impl<M, G> Clone for FaceView<M, G>
+impl<M, G, C> Clone for FaceView<M, G, C>
 where
-    M: AsRef<Mesh<G>> + Clone,
+    M: AsRef<Mesh<G, C>> + Clone,
     G: Geometry,
+    C: Consistency,
 {
     fn clone(&self) -> Self {
         FaceView {
@@ -217,17 +242,19 @@ where
     }
 }
 
-impl<M, G> Copy for FaceView<M, G>
+impl<M, G, C> Copy for FaceView<M, G, C>
 where
-    M: AsRef<Mesh<G>> + Copy,
+    M: AsRef<Mesh<G, C>> + Copy,
     G: Geometry,
+    C: Consistency,
 {
 }
 
-impl<M, G> View<M, G> for FaceView<M, G>
+impl<M, G, C> View<M, G, C> for FaceView<M, G, C>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
     type Topology = Face<G>;
 
@@ -327,7 +354,7 @@ impl FaceKeyTopology {
 
 pub struct VertexCirculator<M, G>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>>,
     G: Geometry,
 {
     inner: EdgeCirculator<M, G>,
@@ -335,7 +362,7 @@ where
 
 impl<M, G> VertexCirculator<M, G>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>>,
     G: Geometry,
 {
     fn from_edge_circulator(edges: EdgeCirculator<M, G>) -> Self {
@@ -343,11 +370,11 @@ where
     }
 }
 
-impl<'a, G> Iterator for VertexCirculator<&'a Mesh<G>, G>
+impl<'a, G> Iterator for VertexCirculator<&'a Mesh<G, Consistent>, G>
 where
     G: Geometry,
 {
-    type Item = VertexView<&'a Mesh<G>, G>;
+    type Item = VertexView<&'a Mesh<G, Consistent>, G, Consistent>;
 
     fn next(&mut self) -> Option<Self::Item> {
         <EdgeCirculator<_, G> as Iterator>::next(&mut self.inner)
@@ -355,7 +382,7 @@ where
     }
 }
 
-impl<'a, G> Iterator for VertexCirculator<&'a mut Mesh<G>, G>
+impl<'a, G> Iterator for VertexCirculator<&'a mut Mesh<G, Consistent>, G>
 where
     G: Geometry,
 {
@@ -389,20 +416,20 @@ where
 
 pub struct EdgeCirculator<M, G>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>>,
     G: Geometry,
 {
-    face: FaceView<M, G>,
+    face: FaceView<M, G, Consistent>,
     edge: Option<EdgeKey>,
     breadcrumb: Option<EdgeKey>,
 }
 
 impl<M, G> EdgeCirculator<M, G>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>>,
     G: Geometry,
 {
-    fn new(face: FaceView<M, G>) -> Self {
+    fn new(face: FaceView<M, G, Consistent>) -> Self {
         let edge = face.edge;
         EdgeCirculator {
             face: face,
@@ -427,18 +454,18 @@ where
     }
 }
 
-impl<'a, G> Iterator for EdgeCirculator<&'a Mesh<G>, G>
+impl<'a, G> Iterator for EdgeCirculator<&'a Mesh<G, Consistent>, G>
 where
     G: Geometry,
 {
-    type Item = EdgeView<&'a Mesh<G>, G>;
+    type Item = EdgeView<&'a Mesh<G, Consistent>, G, Consistent>;
 
     fn next(&mut self) -> Option<Self::Item> {
         <EdgeCirculator<_, _>>::next(self).map(|edge| EdgeView::new(self.face.mesh, edge))
     }
 }
 
-impl<'a, G> Iterator for EdgeCirculator<&'a mut Mesh<G>, G>
+impl<'a, G> Iterator for EdgeCirculator<&'a mut Mesh<G, Consistent>, G>
 where
     G: Geometry,
 {
@@ -470,7 +497,7 @@ where
 
 pub struct FaceCirculator<M, G>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>>,
     G: Geometry,
 {
     inner: EdgeCirculator<M, G>,
@@ -478,7 +505,7 @@ where
 
 impl<M, G> FaceCirculator<M, G>
 where
-    M: AsRef<Mesh<G>>,
+    M: AsRef<Mesh<G, Consistent>>,
     G: Geometry,
 {
     fn from_edge_circulator(edges: EdgeCirculator<M, G>) -> Self {
@@ -506,18 +533,18 @@ where
     }
 }
 
-impl<'a, G> Iterator for FaceCirculator<&'a Mesh<G>, G>
+impl<'a, G> Iterator for FaceCirculator<&'a Mesh<G, Consistent>, G>
 where
     G: Geometry,
 {
-    type Item = FaceView<&'a Mesh<G>, G>;
+    type Item = FaceView<&'a Mesh<G, Consistent>, G, Consistent>;
 
     fn next(&mut self) -> Option<Self::Item> {
         <FaceCirculator<_, _>>::next(self).map(|face| FaceView::new(self.inner.face.mesh, face))
     }
 }
 
-impl<'a, G> Iterator for FaceCirculator<&'a mut Mesh<G>, G>
+impl<'a, G> Iterator for FaceCirculator<&'a mut Mesh<G, Consistent>, G>
 where
     G: 'a + Geometry,
 {
