@@ -8,6 +8,13 @@ use graph::{GraphError, Perimeter};
 use graph::mesh::{Connectivity, Consistent, Edge, Face, Inconsistent, Mesh, Vertex};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
 
+trait Mutate<G>
+where
+    G: Geometry,
+{
+    fn mutate(mesh: Mesh<G, Consistent>) -> Self;
+}
+
 trait Commit<G>
 where
     G: Geometry,
@@ -15,12 +22,10 @@ where
     fn commit(self) -> Result<Mesh<G, Consistent>, Error>;
 }
 
-pub trait ModalMutation<G>: Deref<Target = Mutation<G>> + DerefMut + Sized
+pub trait ModalMutation<G>: Deref<Target = Mutation<G>> + DerefMut
 where
     G: Geometry,
 {
-    fn mutate(mesh: Mesh<G, Consistent>) -> Self;
-
     fn insert_face(
         &mut self,
         vertices: &[VertexKey],
@@ -288,6 +293,15 @@ where
     }
 }
 
+impl<G> Mutate<G> for ImmediateMutation<G>
+where
+    G: Geometry,
+{
+    fn mutate(mesh: Mesh<G, Consistent>) -> Self {
+        ImmediateMutation::mutate(mesh)
+    }
+}
+
 impl<G> Commit<G> for ImmediateMutation<G>
 where
     G: Geometry,
@@ -301,10 +315,6 @@ impl<G> ModalMutation<G> for ImmediateMutation<G>
 where
     G: Geometry,
 {
-    fn mutate(mesh: Mesh<G, Consistent>) -> Self {
-        ImmediateMutation::mutate(mesh)
-    }
-
     fn insert_face(
         &mut self,
         vertices: &[VertexKey],
@@ -480,6 +490,15 @@ where
     }
 }
 
+impl<G> Mutate<G> for BatchMutation<G>
+where
+    G: Geometry,
+{
+    fn mutate(mesh: Mesh<G, Consistent>) -> Self {
+        BatchMutation::mutate(mesh)
+    }
+}
+
 impl<G> Commit<G> for BatchMutation<G>
 where
     G: Geometry,
@@ -493,10 +512,6 @@ impl<G> ModalMutation<G> for BatchMutation<G>
 where
     G: Geometry,
 {
-    fn mutate(mesh: Mesh<G, Consistent>) -> Self {
-        BatchMutation::mutate(mesh)
-    }
-
     fn insert_face(
         &mut self,
         vertices: &[VertexKey],
@@ -579,7 +594,7 @@ where
 
 pub struct ReplaceMutation<'a, M, G>
 where
-    M: Commit<G> + ModalMutation<G>,
+    M: ModalMutation<G>,
     G: 'a + Geometry,
 {
     mesh: &'a mut Mesh<G, Consistent>,
@@ -588,7 +603,7 @@ where
 
 impl<'a, M, G> ReplaceMutation<'a, M, G>
 where
-    M: Commit<G> + ModalMutation<G>,
+    M: Commit<G> + ModalMutation<G> + Mutate<G>,
     G: 'a + Geometry,
 {
     fn mutate(mesh: &'a mut Mesh<G, Consistent>, replacement: Mesh<G, Consistent>) -> Self {
@@ -608,7 +623,7 @@ where
 
 impl<'a, M, G> Deref for ReplaceMutation<'a, M, G>
 where
-    M: Commit<G> + ModalMutation<G>,
+    M: ModalMutation<G>,
     G: 'a + Geometry,
 {
     type Target = M;
@@ -620,7 +635,7 @@ where
 
 impl<'a, M, G> DerefMut for ReplaceMutation<'a, M, G>
 where
-    M: Commit<G> + ModalMutation<G>,
+    M: ModalMutation<G>,
     G: 'a + Geometry,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
