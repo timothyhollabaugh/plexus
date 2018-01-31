@@ -4,74 +4,23 @@ use std::mem;
 use std::ops::{Deref, DerefMut};
 
 use geometry::Geometry;
-use graph::{GraphError, Mesh, Perimeter};
-use graph::mesh::{Connectivity, Consistency, Consistent, Edge, Face, Inconsistent, Vertex};
+use graph::{GraphError, Perimeter};
+use graph::mesh::{Connectivity, Consistent, Edge, Face, Inconsistent, Mesh, Vertex};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
 
-enum Mode<I = (), B = ()> {
-    Immediate(I),
-    Batch(B),
+trait Commit<G>
+where
+    G: Geometry,
+{
+    fn commit(self) -> Result<Mesh<G, Consistent>, Error>;
 }
 
-type Mutant<'a, G> = Mode<&'a mut Mesh<G, Inconsistent>, Mesh<G, Inconsistent>>;
-
-impl<'a, G> Mutant<'a, G>
+pub trait ModalMutation<G>: Deref<Target = Mutation<G>> + DerefMut + Sized
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
-    pub fn get(&self) -> &Mesh<G, Inconsistent> {
-        match *self {
-            Mode::Batch(ref mesh) => mesh,
-            Mode::Immediate(ref mesh) => mesh,
-        }
-    }
+    fn mutate(mesh: Mesh<G, Consistent>) -> Self;
 
-    pub fn get_mut(&mut self) -> &mut Mesh<G, Inconsistent> {
-        match *self {
-            Mode::Batch(ref mut mesh) => mesh,
-            Mode::Immediate(ref mut mesh) => mesh,
-        }
-    }
-
-    pub fn into_immediate(self) -> Option<&'a mut Mesh<G, Inconsistent>> {
-        match self {
-            Mode::Immediate(mesh) => Some(mesh),
-            _ => None,
-        }
-    }
-
-    pub fn into_batch(self) -> Option<Mesh<G, Inconsistent>> {
-        match self {
-            Mode::Batch(mesh) => Some(mesh),
-            _ => None,
-        }
-    }
-}
-
-impl<'a, G> Deref for Mutant<'a, G>
-where
-    G: 'a + Geometry,
-{
-    type Target = Mesh<G, Inconsistent>;
-
-    fn deref(&self) -> &Self::Target {
-        self.get()
-    }
-}
-
-impl<'a, G> DerefMut for Mutant<'a, G>
-where
-    G: 'a + Geometry,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.get_mut()
-    }
-}
-
-pub trait ModalMutation<'a, G>: Deref<Target = Mutation<'a, G>> + DerefMut
-where
-    G: 'a + Geometry,
-{
     fn insert_face(
         &mut self,
         vertices: &[VertexKey],
@@ -89,46 +38,36 @@ where
 ///
 /// Mutates a `Mesh`. This type provides general operations that are supported
 /// by both immediate and batch mutations.
-pub struct Mutation<'a, G>
+pub struct Mutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
-    mesh: Mutant<'a, G>,
+    mesh: Mesh<G, Inconsistent>,
 }
 
-impl<'a, G> Mutation<'a, G>
+impl<G> Mutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
-    pub fn immediate(mesh: &'a mut Mesh<G, Inconsistent>) -> ImmediateMutation<'a, G> {
-        ImmediateMutation::new(Mutation {
-            mesh: Mode::Immediate(mesh),
-        })
+    fn mutate(mesh: Mesh<G, Consistent>) -> Self {
+        Mutation {
+            mesh: mesh.into_consistency(),
+        }
     }
 
-    pub fn batch(mesh: Mesh<G, Inconsistent>) -> BatchMutation<'a, G> {
-        BatchMutation::new(Mutation {
-            mesh: Mode::Batch(mesh),
-        })
+    pub fn as_mesh(&self) -> &Mesh<G, Inconsistent> {
+        &self.mesh
     }
 
-    pub fn replace(mesh: &'a mut Mesh<G, Inconsistent>, replacement: Mesh<G, Consistent>) -> ReplaceMutation<'a, G> {
-        ReplaceMutation::new(mesh, replacement.into_consistency())
-    }
-
-    pub fn as_mesh(&self) -> &Mesh<G> {
-        self.mesh.get()
-    }
-
-    pub fn as_mesh_mut(&mut self) -> &mut Mesh<G> {
-        self.mesh.get_mut()
+    pub fn as_mesh_mut(&mut self) -> &mut Mesh<G, Inconsistent> {
+        &mut self.mesh
     }
 }
 
 /// Vertex mutations.
-impl<'a, G> Mutation<'a, G>
+impl<G> Mutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
     pub fn insert_vertex(&mut self, geometry: G::Vertex) -> VertexKey {
         self.mesh
@@ -138,16 +77,15 @@ where
 }
 
 /// Edge mutations.
-impl<'a, G> Mutation<'a, G>
+impl<G> Mutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
     pub fn insert_edge(
         &mut self,
         vertices: (VertexKey, VertexKey),
         geometry: G::Edge,
     ) -> Result<EdgeKey, Error> {
-        let mesh = self.mesh.get_mut();
         let (a, b) = vertices;
         let ab = (a, b).into();
         let ba = (b, a).into();
@@ -156,14 +94,14 @@ where
         // half-edge may only have one associated face, at most one preceding
         // half-edge, at most one following half-edge, and may form at most one
         // closed loop.
-        if mesh.edges.contains_key(&ab) {
+        if self.mesh.edges.contains_key(&ab) {
             return Err(GraphError::TopologyConflict.into());
         }
         let vertex = {
-            if !mesh.vertices.contains_key(&b) {
+            if !self.mesh.vertices.contains_key(&b) {
                 return Err(GraphError::TopologyNotFound.into());
             }
-            match mesh.vertices.get_mut(&a) {
+            match self.mesh.vertices.get_mut(&a) {
                 Some(vertex) => vertex,
                 _ => {
                     return Err(GraphError::TopologyNotFound.into());
@@ -173,11 +111,11 @@ where
         let mut edge = Edge::new(b, geometry);
         // This is the point of no return. The mesh has been mutated. Unwrap
         // results.
-        if let Some(opposite) = mesh.edges.get_mut(&ba) {
+        if let Some(opposite) = self.mesh.edges.get_mut(&ba) {
             edge.opposite = Some(ba);
             opposite.opposite = Some(ab);
         }
-        mesh.edges.insert_with_key(&ab, edge);
+        self.mesh.edges.insert_with_key(&ab, edge);
         vertex.edge = Some(ab);
         Ok(ab)
     }
@@ -208,10 +146,10 @@ where
 
     pub fn remove_edge(&mut self, edge: EdgeKey) -> Result<Edge<G>, Error> {
         if let Some(mut edge) = self.mesh.edge_mut(edge) {
-            if let Some(mut next) = edge.raw_next_edge_mut() {
+            if let Some(mut next) = edge.next_edge_mut() {
                 next.previous = None;
             }
-            if let Some(mut previous) = edge.raw_previous_edge_mut() {
+            if let Some(mut previous) = edge.previous_edge_mut() {
                 previous.next = None;
             }
             edge.source_vertex_mut().edge = None;
@@ -231,9 +169,9 @@ where
 }
 
 /// Face mutations.
-impl<'a, G> Mutation<'a, G>
+impl<G> Mutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
     fn connect_face_interior(&mut self, edges: &[EdgeKey], face: FaceKey) -> Result<(), Error> {
         for (ab, bc) in edges.perimeter() {
@@ -272,7 +210,8 @@ where
                             .edge((a, b).into())
                             .unwrap()
                             .into_previous_edge()
-                            .into_raw_opposite_edge()
+                            .unwrap()
+                            .into_opposite_edge()
                     })
                     .unwrap()
                     .key();
@@ -289,7 +228,8 @@ where
                             .edge((a, b).into())
                             .unwrap()
                             .into_next_edge()
-                            .into_raw_opposite_edge()
+                            .unwrap()
+                            .into_opposite_edge()
                     })
                     .unwrap()
                     .key();
@@ -319,30 +259,52 @@ where
 /// This type provides mutations that are only available in immediate mode.
 /// Immediate mutations are atomic, and fail immediately if the integrity of
 /// the mesh is compromised.
-pub struct ImmediateMutation<'a, G>
+pub struct ImmediateMutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
-    mutation: Mutation<'a, G>,
+    mutation: Mutation<G>,
 }
 
-impl<'a, G> ImmediateMutation<'a, G>
+impl<G> ImmediateMutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
-    fn new(mutation: Mutation<'a, G>) -> Self {
-        ImmediateMutation { mutation }
+    pub fn mutate(mesh: Mesh<G, Consistent>) -> Self {
+        ImmediateMutation {
+            mutation: Mutation::mutate(mesh),
+        }
     }
 
-    pub fn commit(self) -> &'a mut Mesh<G> {
-        self.mutation.mesh.into_immediate().unwrap()
+    pub fn replace(
+        mesh: &mut Mesh<G, Consistent>,
+        replacement: Mesh<G, Consistent>,
+    ) -> ReplaceMutation<Self, G> {
+        ReplaceMutation::mutate(mesh, replacement)
+    }
+
+    pub fn commit(self) -> Mesh<G, Consistent> {
+        self.mutation.mesh.into_consistency()
     }
 }
 
-impl<'a, G> ModalMutation<'a, G> for ImmediateMutation<'a, G>
+impl<G> Commit<G> for ImmediateMutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
+    fn commit(self) -> Result<Mesh<G, Consistent>, Error> {
+        Ok(ImmediateMutation::<G>::commit(self))
+    }
+}
+
+impl<G> ModalMutation<G> for ImmediateMutation<G>
+where
+    G: Geometry,
+{
+    fn mutate(mesh: Mesh<G, Consistent>) -> Self {
+        ImmediateMutation::mutate(mesh)
+    }
+
     fn insert_face(
         &mut self,
         vertices: &[VertexKey],
@@ -441,20 +403,20 @@ where
     }
 }
 
-impl<'a, G> Deref for ImmediateMutation<'a, G>
+impl<G> Deref for ImmediateMutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
-    type Target = Mutation<'a, G>;
+    type Target = Mutation<G>;
 
     fn deref(&self) -> &Self::Target {
         &self.mutation
     }
 }
 
-impl<'a, G> DerefMut for ImmediateMutation<'a, G>
+impl<G> DerefMut for ImmediateMutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.mutation
@@ -467,27 +429,34 @@ where
 /// mutations defer certain types of integrity errors until a series of
 /// mutations are complete. When `commit` is called, the integrity of the mesh
 /// is verified before yielding it to the caller.
-pub struct BatchMutation<'a, G>
+pub struct BatchMutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
-    mutation: Mutation<'a, G>,
+    mutation: Mutation<G>,
     singularities: HashMap<VertexKey, HashSet<FaceKey>>,
 }
 
-impl<'a, G> BatchMutation<'a, G>
+impl<G> BatchMutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
-    fn new(mutation: Mutation<'a, G>) -> Self {
+    pub fn mutate(mesh: Mesh<G, Consistent>) -> Self {
         BatchMutation {
-            mutation: mutation,
+            mutation: Mutation::mutate(mesh),
             singularities: HashMap::new(),
         }
     }
 
-    pub fn commit(self) -> Result<Mesh<G>, Error> {
-        let mesh = self.mutation.mesh.into_batch().unwrap();
+    pub fn replace(
+        mesh: &mut Mesh<G, Consistent>,
+        replacement: Mesh<G, Consistent>,
+    ) -> ReplaceMutation<Self, G> {
+        ReplaceMutation::mutate(mesh, replacement)
+    }
+
+    pub fn commit(self) -> Result<Mesh<G, Consistent>, Error> {
+        let mesh = self.mutation.mesh.into_consistency();
         for (vertex, faces) in self.singularities {
             // TODO: This will not detect exactly two faces joined by a single
             //       vertex. This is technically supported, but perhaps should
@@ -511,10 +480,23 @@ where
     }
 }
 
-impl<'a, G> ModalMutation<'a, G> for BatchMutation<'a, G>
+impl<G> Commit<G> for BatchMutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
+    fn commit(self) -> Result<Mesh<G, Consistent>, Error> {
+        BatchMutation::<G>::commit(self)
+    }
+}
+
+impl<G> ModalMutation<G> for BatchMutation<G>
+where
+    G: Geometry,
+{
+    fn mutate(mesh: Mesh<G, Consistent>) -> Self {
+        BatchMutation::mutate(mesh)
+    }
+
     fn insert_face(
         &mut self,
         vertices: &[VertexKey],
@@ -575,66 +557,70 @@ where
     }
 }
 
-impl<'a, G> Deref for BatchMutation<'a, G>
+impl<G> Deref for BatchMutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
-    type Target = Mutation<'a, G>;
+    type Target = Mutation<G>;
 
     fn deref(&self) -> &Self::Target {
         &self.mutation
     }
 }
 
-impl<'a, G> DerefMut for BatchMutation<'a, G>
+impl<G> DerefMut for BatchMutation<G>
 where
-    G: 'a + Geometry,
+    G: Geometry,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.mutation
     }
 }
 
-pub struct ReplaceMutation<'a, G>
+pub struct ReplaceMutation<'a, M, G>
 where
+    M: Commit<G> + ModalMutation<G>,
     G: 'a + Geometry,
 {
-    mesh: &'a mut Mesh<G>,
-    mutation: BatchMutation<'a, G>,
+    mesh: &'a mut Mesh<G, Consistent>,
+    mutation: M,
 }
 
-impl<'a, G> ReplaceMutation<'a, G>
+impl<'a, M, G> ReplaceMutation<'a, M, G>
 where
+    M: Commit<G> + ModalMutation<G>,
     G: 'a + Geometry,
 {
-    fn new(mesh: &'a mut Mesh<G>, replacement: Mesh<G>) -> Self {
+    fn mutate(mesh: &'a mut Mesh<G, Consistent>, replacement: Mesh<G, Consistent>) -> Self {
         let mutant = mem::replace(mesh, replacement);
         ReplaceMutation {
             mesh: mesh,
-            mutation: Mutation::batch(mutant),
+            mutation: M::mutate(mutant),
         }
     }
 
-    pub fn commit(self) -> Result<&'a mut Mesh<G>, Error> {
+    pub fn commit(self) -> Result<&'a mut Mesh<G, Consistent>, Error> {
         let ReplaceMutation { mesh, mutation } = self;
         mem::replace(mesh, mutation.commit()?);
         Ok(mesh)
     }
 }
 
-impl<'a, G> Deref for ReplaceMutation<'a, G>
+impl<'a, M, G> Deref for ReplaceMutation<'a, M, G>
 where
+    M: Commit<G> + ModalMutation<G>,
     G: 'a + Geometry,
 {
-    type Target = BatchMutation<'a, G>;
+    type Target = M;
 
     fn deref(&self) -> &Self::Target {
         &self.mutation
     }
 }
 
-impl<'a, G> DerefMut for ReplaceMutation<'a, G>
+impl<'a, M, G> DerefMut for ReplaceMutation<'a, M, G>
 where
+    M: Commit<G> + ModalMutation<G>,
     G: 'a + Geometry,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {

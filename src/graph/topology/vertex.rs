@@ -54,7 +54,7 @@ where
     C: Consistency,
 {
     // Resolve the `M` parameter to a concrete reference.
-    fn with_mesh_mut(&mut self) -> VertexView<&mut Mesh<G, Consistent>, G, Consistent> {
+    fn with_mesh_mut(&mut self) -> VertexView<&mut Mesh<G, C>, G, C> {
         VertexView::new(self.mesh.as_mut(), self.key)
     }
 }

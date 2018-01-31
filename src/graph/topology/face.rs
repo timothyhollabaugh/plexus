@@ -8,7 +8,7 @@ use graph::{GraphError, Perimeter};
 use graph::geometry::{FaceCentroid, FaceNormal};
 use graph::geometry::alias::{ScaledFaceNormal, VertexPosition};
 use graph::mesh::{Consistency, Consistent, Edge, Face, Mesh, Vertex};
-use graph::mutation::{ModalMutation, Mutation};
+use graph::mutation::{BatchMutation, ImmediateMutation, ModalMutation};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
 use graph::topology::{edge, EdgeKeyTopology, EdgeView, OrphanEdgeView, OrphanVertexView,
                       OrphanView, Topological, VertexView, View};
@@ -48,7 +48,7 @@ where
     }
 
     // Resolve the `M` parameter to a concrete reference.
-    fn with_mesh_ref(&self) -> FaceView<&Mesh<G>, G> {
+    fn with_mesh_ref(&self) -> FaceView<&Mesh<G, C>, G, C> {
         FaceView::new(self.mesh.as_ref(), self.key)
     }
 }
@@ -60,7 +60,7 @@ where
     C: Consistency,
 {
     // Resolve the `M` parameter to a concrete reference.
-    fn with_mesh_mut(&mut self) -> FaceView<&mut Mesh<G, Consistent>, G> {
+    fn with_mesh_mut(&mut self) -> FaceView<&mut Mesh<G, C>, G, C> {
         FaceView::new(self.mesh.as_mut(), self.key)
     }
 }
@@ -117,7 +117,7 @@ where
         let FaceView {
             mesh, key: source, ..
         } = self;
-        let mut mutation = Mutation::replace(mesh, Mesh::empty());
+        let mut mutation = BatchMutation::replace(mesh, Mesh::empty());
         join(&mut *mutation, source, destination)?;
         mutation.commit()?;
         Ok(())
@@ -142,9 +142,9 @@ where
         self,
     ) -> Result<Option<VertexView<&'a mut Mesh<G, Consistent>, G, Consistent>>, Error> {
         let FaceView { mesh, key: abc, .. } = self;
-        let mut mutation = Mutation::immediate(mesh);
-        Ok(match triangulate(&mut mutation, abc)? {
-            Some(vertex) => Some(VertexView::new(mutation.commit(), vertex)),
+        let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
+        Ok(match triangulate(&mut *mutation, abc)? {
+            Some(vertex) => Some(VertexView::new(mutation.commit().unwrap(), vertex)),
             _ => None,
         })
     }
@@ -175,7 +175,7 @@ where
         VertexPosition<G>: Add<ScaledFaceNormal<G, T>, Output = VertexPosition<G>> + Clone,
     {
         let FaceView { mesh, key: abc, .. } = self;
-        let mut mutation = Mutation::replace(mesh, Mesh::empty());
+        let mut mutation = BatchMutation::replace(mesh, Mesh::empty());
         let face = extrude(&mut *mutation, abc, distance)?;
         Ok(FaceView::new(mutation.commit().unwrap(), face))
     }
@@ -578,13 +578,13 @@ where
     }
 }
 
-pub(in graph) fn triangulate<'a, M, G>(
+pub(in graph) fn triangulate<M, G>(
     mutation: &mut M,
     abc: FaceKey,
 ) -> Result<Option<VertexKey>, Error>
 where
-    M: ModalMutation<'a, G>,
-    G: 'a + FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
+    M: ModalMutation<G>,
+    G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
 {
     let (perimeter, centroid, face) = {
         let face = match mutation.as_mesh().face(abc) {
@@ -611,14 +611,14 @@ where
     Ok(Some(c))
 }
 
-pub(in graph) fn join<'a, M, G>(
+pub(in graph) fn join<M, G>(
     mutation: &mut M,
     source: FaceKey,
     destination: FaceKey,
 ) -> Result<(), Error>
 where
-    M: ModalMutation<'a, G>,
-    G: 'a + Geometry,
+    M: ModalMutation<G>,
+    G: Geometry,
 {
     let (sources, destination) = {
         let source = match mutation.as_mesh().face(source) {
@@ -678,14 +678,14 @@ where
     Ok(())
 }
 
-pub(in graph) fn extrude<'a, M, G, T>(
+pub(in graph) fn extrude<M, G, T>(
     mutation: &mut M,
     abc: FaceKey,
     distance: T,
 ) -> Result<FaceKey, Error>
 where
-    M: ModalMutation<'a, G>,
-    G: 'a + FaceNormal + Geometry,
+    M: ModalMutation<G>,
+    G: FaceNormal + Geometry,
     G::Normal: Mul<T>,
     G::Vertex: AsPosition,
     ScaledFaceNormal<G, T>: Clone,

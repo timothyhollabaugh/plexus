@@ -15,7 +15,7 @@ use geometry::Geometry;
 use geometry::convert::{FromGeometry, FromInteriorGeometry, IntoGeometry, IntoInteriorGeometry};
 use graph::{GraphError, Perimeter};
 use graph::geometry::FaceCentroid;
-use graph::mutation::{ModalMutation, Mutation};
+use graph::mutation::{BatchMutation, ModalMutation};
 use graph::storage::{EdgeKey, FaceKey, Storage, StorageIter, StorageIterMut, VertexKey};
 use graph::topology::{EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut,
                       OrphanVertexMut, OrphanView, Topological, VertexMut, VertexRef, View};
@@ -225,37 +225,6 @@ where
     G: Geometry,
     C: Consistency,
 {
-    /// Creates an empty `Mesh`.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use plexus::graph::Mesh;
-    ///
-    /// let mut mesh = Mesh::<()>::new();
-    /// ```
-    pub fn new() -> Self {
-        Mesh {
-            vertices: Storage::new(),
-            edges: Storage::new(),
-            faces: Storage::new(),
-            phantom: PhantomData,
-        }
-    }
-
-    /// Creates an empty `Mesh`.
-    ///
-    /// Underlying storage has zero capacity and does not allocate until the
-    /// first insertion.
-    pub(in graph) fn empty() -> Self {
-        Mesh {
-            vertices: Storage::empty(),
-            edges: Storage::empty(),
-            faces: Storage::empty(),
-            phantom: PhantomData,
-        }
-    }
-
     pub(in graph) fn into_consistency<T>(self) -> Mesh<G, T>
     where
         T: Consistency,
@@ -272,65 +241,6 @@ where
             faces,
             phantom: PhantomData,
         }
-    }
-
-    /// Creates a `Mesh` from raw index and vertex buffers. The arity of the
-    /// polygons in the index buffer must be known and constant.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the arity of the index buffer is not constant, any
-    /// index is out of bounds, or there is an error inserting topology into
-    /// the mesh.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # extern crate nalgebra;
-    /// # extern crate plexus;
-    /// use nalgebra::Point3;
-    /// use plexus::generate::LruIndexer;
-    /// use plexus::generate::sphere::UvSphere;
-    /// use plexus::graph::Mesh;
-    /// use plexus::prelude::*;
-    ///
-    /// # fn main() {
-    /// let (indeces, positions) = UvSphere::new(16, 16)
-    ///     .polygons_with_position()
-    ///     .triangulate()
-    ///     .flat_index_vertices(LruIndexer::with_capacity(256));
-    /// let mut mesh = Mesh::<Point3<f64>>::from_raw_buffers(indeces, positions, 3);
-    /// # }
-    /// ```
-    pub fn from_raw_buffers<I, J>(indeces: I, vertices: J, arity: usize) -> Result<Self, Error>
-    where
-        I: IntoIterator<Item = usize>,
-        J: IntoIterator,
-        J::Item: IntoGeometry<G::Vertex>,
-    {
-        let mut mutation = Mutation::batch(Mesh::new());
-        let vertices = vertices
-            .into_iter()
-            .map(|vertex| mutation.insert_vertex(vertex.into_geometry()))
-            .collect::<Vec<_>>();
-        for face in &indeces.into_iter().chunks(arity) {
-            let face = face.collect::<Vec<_>>();
-            if face.len() != arity {
-                return Err(GraphError::ArityConflict {
-                    expected: arity,
-                    actual: face.len(),
-                }.context("index buffer lenght is not a multiple of arity")
-                    .into());
-            }
-            let mut perimeter = Vec::with_capacity(arity);
-            for index in face {
-                perimeter.push(*vertices
-                    .get(index)
-                    .ok_or_else(|| Error::from(GraphError::TopologyNotFound))?);
-            }
-            mutation.insert_face(&perimeter, Default::default())?;
-        }
-        mutation.commit()
     }
 
     /// Gets the number of vertices in the mesh.
@@ -445,6 +355,101 @@ where
     pub fn faces_mut(&mut self) -> MeshIterMut<OrphanFaceMut<G>, G, C> {
         MeshIterMut::new(self.faces.iter_mut())
     }
+}
+
+impl<G> Mesh<G, Consistent>
+where
+    G: Geometry,
+{
+    /// Creates an empty `Mesh`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use plexus::graph::Mesh;
+    ///
+    /// let mut mesh = Mesh::<()>::new();
+    /// ```
+    pub fn new() -> Self {
+        Mesh {
+            vertices: Storage::new(),
+            edges: Storage::new(),
+            faces: Storage::new(),
+            phantom: PhantomData,
+        }
+    }
+
+    /// Creates an empty `Mesh`.
+    ///
+    /// Underlying storage has zero capacity and does not allocate until the
+    /// first insertion.
+    pub(in graph) fn empty() -> Self {
+        Mesh {
+            vertices: Storage::empty(),
+            edges: Storage::empty(),
+            faces: Storage::empty(),
+            phantom: PhantomData,
+        }
+    }
+
+    /// Creates a `Mesh` from raw index and vertex buffers. The arity of the
+    /// polygons in the index buffer must be known and constant.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the arity of the index buffer is not constant, any
+    /// index is out of bounds, or there is an error inserting topology into
+    /// the mesh.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # extern crate nalgebra;
+    /// # extern crate plexus;
+    /// use nalgebra::Point3;
+    /// use plexus::generate::LruIndexer;
+    /// use plexus::generate::sphere::UvSphere;
+    /// use plexus::graph::Mesh;
+    /// use plexus::prelude::*;
+    ///
+    /// # fn main() {
+    /// let (indeces, positions) = UvSphere::new(16, 16)
+    ///     .polygons_with_position()
+    ///     .triangulate()
+    ///     .flat_index_vertices(LruIndexer::with_capacity(256));
+    /// let mut mesh = Mesh::<Point3<f64>>::from_raw_buffers(indeces, positions, 3);
+    /// # }
+    /// ```
+    pub fn from_raw_buffers<I, J>(indeces: I, vertices: J, arity: usize) -> Result<Self, Error>
+    where
+        I: IntoIterator<Item = usize>,
+        J: IntoIterator,
+        J::Item: IntoGeometry<G::Vertex>,
+    {
+        let mut mutation = BatchMutation::mutate(Mesh::new());
+        let vertices = vertices
+            .into_iter()
+            .map(|vertex| mutation.insert_vertex(vertex.into_geometry()))
+            .collect::<Vec<_>>();
+        for face in &indeces.into_iter().chunks(arity) {
+            let face = face.collect::<Vec<_>>();
+            if face.len() != arity {
+                return Err(GraphError::ArityConflict {
+                    expected: arity,
+                    actual: face.len(),
+                }.context("index buffer lenght is not a multiple of arity")
+                    .into());
+            }
+            let mut perimeter = Vec::with_capacity(arity);
+            for index in face {
+                perimeter.push(*vertices
+                    .get(index)
+                    .ok_or_else(|| Error::from(GraphError::TopologyNotFound))?);
+            }
+            mutation.insert_face(&perimeter, Default::default())?;
+        }
+        mutation.commit()
+    }
 
     /// Triangulates the mesh, tesselating all faces into triangles.
     pub fn triangulate(&mut self) -> Result<(), Error>
@@ -493,7 +498,7 @@ where
     ) -> Result<MeshBuffer<N, V>, Error>
     where
         N: Copy + Integer + NumCast + Unsigned,
-        F: FnMut(VertexRef<G, C>) -> V,
+        F: FnMut(VertexRef<G, Consistent>) -> V,
     {
         let (keys, vertices) = {
             let mut keys = HashMap::with_capacity(self.vertex_count());
@@ -552,7 +557,7 @@ where
     pub fn to_mesh_buffer_by_face_with<N, V, F>(&self, mut f: F) -> Result<MeshBuffer<N, V>, Error>
     where
         N: Copy + Integer + NumCast + Unsigned,
-        F: FnMut(FaceRef<G, C>, VertexRef<G, C>) -> V,
+        F: FnMut(FaceRef<G, Consistent>, VertexRef<G, Consistent>) -> V,
     {
         let vertices = {
             let arity = match self.faces().nth(0) {
@@ -694,10 +699,9 @@ where
     }
 }
 
-impl<G, C> Default for Mesh<G, C>
+impl<G> Default for Mesh<G, Consistent>
 where
     G: Geometry,
-    C: Consistency,
 {
     fn default() -> Self {
         Mesh::new()
@@ -742,7 +746,7 @@ where
         I: IntoIterator<Item = P>,
         N: Indexer<P, P::Vertex>,
     {
-        let mut mutation = Mutation::batch(Mesh::new());
+        let mut mutation = BatchMutation::mutate(Mesh::new());
         let (indeces, vertices) = input.into_iter().index_vertices(indexer);
         let vertices = vertices
             .into_iter()
@@ -798,7 +802,7 @@ where
     G: Geometry,
     C: Consistency,
 {
-    fn new(mesh: &'a Mesh<G>, input: StorageIter<'a, T::Topology>) -> Self {
+    fn new(mesh: &'a Mesh<G, C>, input: StorageIter<'a, T::Topology>) -> Self {
         MeshIter {
             mesh: mesh,
             input: input,
@@ -882,7 +886,7 @@ mod tests {
     use generate::*;
     use geometry::*;
     use graph::*;
-    use graph::mutation::{ModalMutation, Mutation};
+    use graph::mutation::{ImmediateMutation, ModalMutation};
 
     #[test]
     fn collect_topology_into_mesh() {
@@ -1003,7 +1007,7 @@ mod tests {
             })
             .unwrap()
             .key();
-        let mut mutation = Mutation::immediate(&mut mesh);
+        let mut mutation = ImmediateMutation::mutate(mesh);
         assert!(match *mutation
             .remove_face(key)
             .err()

@@ -9,7 +9,7 @@ use graph::{GraphError, Perimeter};
 use graph::geometry::{EdgeLateral, EdgeMidpoint};
 use graph::geometry::alias::{ScaledEdgeLateral, VertexPosition};
 use graph::mesh::{Consistency, Consistent, Edge, Face, Inconsistent, Mesh, Vertex};
-use graph::mutation::{ModalMutation, Mutation};
+use graph::mutation::{ImmediateMutation, ModalMutation};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
 use graph::topology::{FaceView, OrphanFaceView, OrphanVertexView, OrphanView, Topological,
                       VertexView, View};
@@ -84,30 +84,6 @@ where
         face.map(|face| FaceView::new(mesh, face))
     }
 
-    pub fn boundary_edge(&self) -> Option<EdgeView<&Mesh<G, C>, G, C>> {
-        use BoolExt;
-
-        if self.is_boundary_edge() {
-            Some(self.with_mesh_ref())
-        }
-        else {
-            let opposite = self.opposite_edge();
-            opposite.is_boundary_edge().into_some(opposite)
-        }
-    }
-
-    pub fn into_boundary_edge(self) -> Option<Self> {
-        use BoolExt;
-
-        if self.is_boundary_edge() {
-            Some(self)
-        }
-        else {
-            let opposite = self.into_opposite_edge();
-            opposite.is_boundary_edge().into_some(opposite)
-        }
-    }
-
     pub fn is_boundary_edge(&self) -> bool {
         self.face().is_none()
     }
@@ -138,19 +114,6 @@ where
     pub fn face_mut(&mut self) -> Option<OrphanFaceView<G>> {
         let face = self.face;
         face.map(move |face| self.mesh.as_mut().orphan_face_mut(face).unwrap())
-    }
-
-    pub fn boundary_edge_mut(&mut self) -> Option<OrphanEdgeView<G>> {
-        use BoolExt;
-
-        if self.is_boundary_edge() {
-            Some(self.mesh.as_mut().orphan_edge_mut(self.key).unwrap())
-        }
-        else {
-            self.opposite_edge()
-                .is_boundary_edge()
-                .into_some(self.opposite_edge_mut())
-        }
     }
 
     // Resolve the `M` parameter to a concrete reference.
@@ -185,6 +148,30 @@ where
         unimplemented!()
     }
 
+    pub fn boundary_edge(&self) -> Option<EdgeView<&Mesh<G, Consistent>, G, Consistent>> {
+        use BoolExt;
+
+        if self.is_boundary_edge() {
+            Some(self.with_mesh_ref())
+        }
+        else {
+            let opposite = self.opposite_edge();
+            opposite.is_boundary_edge().into_some(opposite)
+        }
+    }
+
+    pub fn into_boundary_edge(self) -> Option<Self> {
+        use BoolExt;
+
+        if self.is_boundary_edge() {
+            Some(self)
+        }
+        else {
+            let opposite = self.into_opposite_edge();
+            opposite.is_boundary_edge().into_some(opposite)
+        }
+    }
+
     pub fn into_previous_edge(self) -> Self {
         unimplemented!()
     }
@@ -212,15 +199,28 @@ where
     G: Geometry,
 {
     pub fn opposite_edge_mut(&mut self) -> OrphanEdgeView<G> {
-        self.to_inconsistent_mut().opposite_edge_mut().unwrap()
+        unimplemented!()
     }
 
     pub fn next_edge_mut(&mut self) -> OrphanEdgeView<G> {
-        self.to_inconsistent_mut().next_edge_mut().unwrap()
+        unimplemented!()
     }
 
     pub fn previous_edge_mut(&mut self) -> OrphanEdgeView<G> {
-        self.to_inconsistent_mut().previous_edge_mut().unwrap()
+        unimplemented!()
+    }
+
+    pub fn boundary_edge_mut(&mut self) -> Option<OrphanEdgeView<G>> {
+        use BoolExt;
+
+        if self.is_boundary_edge() {
+            Some(self.mesh.as_mut().orphan_edge_mut(self.key).unwrap())
+        }
+        else {
+            self.opposite_edge()
+                .is_boundary_edge()
+                .into_some(self.opposite_edge_mut())
+        }
     }
 }
 
@@ -298,9 +298,9 @@ where
         let EdgeView {
             mesh, key: source, ..
         } = self;
-        let mut mutation = Mutation::immediate(mesh);
-        let edge = join(&mut mutation, source, destination)?;
-        Ok(EdgeView::new(mutation.commit(), edge))
+        let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
+        let edge = join(&mut *mutation, source, destination)?;
+        Ok(EdgeView::new(mutation.commit().unwrap(), edge))
     }
 }
 
@@ -324,9 +324,9 @@ where
         G: EdgeMidpoint<Midpoint = VertexPosition<G>>,
     {
         let EdgeView { mesh, key: ab, .. } = self;
-        let mut mutation = Mutation::immediate(mesh);
-        let vertex = split(&mut mutation, ab)?;
-        Ok(VertexView::new(mutation.commit(), vertex))
+        let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
+        let vertex = split(&mut *mutation, ab)?;
+        Ok(VertexView::new(mutation.commit().unwrap(), vertex))
     }
 }
 
@@ -355,9 +355,9 @@ where
         VertexPosition<G>: Add<ScaledEdgeLateral<G, T>, Output = VertexPosition<G>> + Clone,
     {
         let EdgeView { mesh, key: ab, .. } = self;
-        let mut mutation = Mutation::immediate(mesh);
-        let edge = extrude(&mut mutation, ab, distance)?;
-        Ok(EdgeView::new(mutation.commit(), edge))
+        let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
+        let edge = extrude(&mut *mutation, ab, distance)?;
+        Ok(EdgeView::new(mutation.commit().unwrap(), edge))
     }
 }
 
@@ -659,20 +659,20 @@ impl EdgeKeyTopology {
     }
 }
 
-pub(in graph) fn split<'a, M, G>(mutation: &mut M, ab: EdgeKey) -> Result<VertexKey, Error>
+pub(in graph) fn split<M, G>(mutation: &mut M, ab: EdgeKey) -> Result<VertexKey, Error>
 where
-    M: ModalMutation<'a, G>,
-    G: 'a + EdgeMidpoint<Midpoint = VertexPosition<G>> + Geometry,
+    M: ModalMutation<G>,
+    G: EdgeMidpoint<Midpoint = VertexPosition<G>> + Geometry,
     G::Vertex: AsPosition,
 {
-    fn split_at_vertex<'a, M, G>(
+    fn split_at_vertex<M, G>(
         mutation: &mut M,
         ab: EdgeKey,
         m: VertexKey,
     ) -> Result<(EdgeKey, EdgeKey), Error>
     where
-        M: ModalMutation<'a, G>,
-        G: 'a + EdgeMidpoint<Midpoint = VertexPosition<G>> + Geometry,
+        M: ModalMutation<G>,
+        G: EdgeMidpoint<Midpoint = VertexPosition<G>> + Geometry,
         G::Vertex: AsPosition,
     {
         // Remove the edge and insert two truncated edges in its place.
@@ -717,7 +717,7 @@ where
             let mut midpoint = edge.source_vertex().geometry.clone();
             *midpoint.as_position_mut() = edge.midpoint()?;
             (
-                edge.raw_opposite_edge().map(|opposite| opposite.key()),
+                edge.opposite_edge().map(|opposite| opposite.key()),
                 midpoint,
             )
         };
@@ -731,14 +731,14 @@ where
     Ok(m)
 }
 
-pub(in graph) fn join<'a, M, G>(
+pub(in graph) fn join<M, G>(
     mutation: &mut M,
     source: EdgeKey,
     destination: EdgeKey,
 ) -> Result<EdgeKey, Error>
 where
-    M: ModalMutation<'a, G>,
-    G: 'a + Geometry,
+    M: ModalMutation<G>,
+    G: Geometry,
 {
     match (
         mutation.as_mesh().edge(source),
@@ -768,6 +768,7 @@ where
             source.geometry.clone(),
             source
                 .opposite_edge()
+                .unwrap()
                 .face()
                 .map(|face| face.geometry.clone())
                 .unwrap_or_else(Default::default),
@@ -778,14 +779,14 @@ where
     Ok(source)
 }
 
-pub(in graph) fn extrude<'a, M, G, T>(
+pub(in graph) fn extrude<M, G, T>(
     mutation: &mut M,
     ab: EdgeKey,
     distance: T,
 ) -> Result<EdgeKey, Error>
 where
-    M: ModalMutation<'a, G>,
-    G: 'a + Geometry + EdgeLateral,
+    M: ModalMutation<G>,
+    G: Geometry + EdgeLateral,
     G::Lateral: Mul<T>,
     G::Vertex: AsPosition,
     ScaledEdgeLateral<G, T>: Clone,
