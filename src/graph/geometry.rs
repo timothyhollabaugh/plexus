@@ -14,8 +14,6 @@ use graph::mesh::Consistent;
 use graph::topology::{EdgeRef, FaceRef};
 use self::alias::*;
 
-// TODO: USE EXPLICIT TYPE PARAMS FOR VIEWS FOR NOW.
-
 pub trait FaceNormal: Geometry {
     type Normal;
 
@@ -32,7 +30,7 @@ where
 {
     type Normal = <<VertexPosition<G> as Sub>::Output as Cross>::Output;
 
-    fn normal(face: FaceRef<Self>) -> Result<Self::Normal, Error> {
+    fn normal(face: FaceRef<Self, Consistent>) -> Result<Self::Normal, Error> {
         let positions = face.vertices()
             .take(3)
             .map(|vertex| vertex.geometry.as_position().clone())
@@ -47,7 +45,7 @@ where
 pub trait FaceCentroid: Geometry {
     type Centroid;
 
-    fn centroid(face: FaceRef<Self>) -> Result<Self::Centroid, Error>;
+    fn centroid(face: FaceRef<Self, Consistent>) -> Result<Self::Centroid, Error>;
 }
 
 impl<G> FaceCentroid for G
@@ -57,7 +55,7 @@ where
 {
     type Centroid = G::Vertex;
 
-    fn centroid(face: FaceRef<Self>) -> Result<Self::Centroid, Error> {
+    fn centroid(face: FaceRef<Self, Consistent>) -> Result<Self::Centroid, Error> {
         Ok(G::Vertex::average(
             face.vertices().map(|vertex| vertex.geometry.clone()),
         ))
@@ -67,7 +65,7 @@ where
 pub trait EdgeMidpoint: Geometry {
     type Midpoint;
 
-    fn midpoint(edge: EdgeRef<Self>) -> Result<Self::Midpoint, Error>;
+    fn midpoint(edge: EdgeRef<Self, Consistent>) -> Result<Self::Midpoint, Error>;
 }
 
 impl<G> EdgeMidpoint for G
@@ -78,7 +76,7 @@ where
 {
     type Midpoint = <VertexPosition<G> as Interpolate>::Output;
 
-    fn midpoint(edge: EdgeRef<Self>) -> Result<Self::Midpoint, Error> {
+    fn midpoint(edge: EdgeRef<Self, Consistent>) -> Result<Self::Midpoint, Error> {
         let a = edge.source_vertex().geometry.as_position().clone();
         let b = edge.destination_vertex().geometry.as_position().clone();
         Ok(a.midpoint(b))
@@ -88,7 +86,7 @@ where
 pub trait EdgeLateral: Geometry {
     type Lateral;
 
-    fn lateral(edge: EdgeRef<Self>) -> Result<Self::Lateral, Error>;
+    fn lateral(edge: EdgeRef<Self, Consistent>) -> Result<Self::Lateral, Error>;
 }
 
 impl<G> EdgeLateral for G
@@ -102,7 +100,7 @@ where
 {
     type Lateral = <VertexPosition<G> as Sub>::Output;
 
-    fn lateral(edge: EdgeRef<Self>) -> Result<Self::Lateral, Error> {
+    fn lateral(edge: EdgeRef<Self, Consistent>) -> Result<Self::Lateral, Error> {
         let a = edge.source_vertex().geometry.as_position().clone();
         let b = edge.destination_vertex().geometry.as_position().clone();
         let c = edge.opposite_edge()
