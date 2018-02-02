@@ -72,11 +72,11 @@ where
         unimplemented!()
     }
 
-    pub fn incoming_edges(&self) -> EdgeCirculator<&Mesh<G, Consistent>, G> {
+    pub fn incoming_edges(&self) -> EdgeCirculator<&Mesh<G, Consistent>, G, Consistent> {
         EdgeCirculator::new(self.with_mesh_ref())
     }
 
-    pub fn faces(&self) -> FaceCirculator<&Mesh<G, Consistent>, G> {
+    pub fn faces(&self) -> FaceCirculator<&Mesh<G, Consistent>, G, Consistent> {
         FaceCirculator::from_edge_circulator(self.incoming_edges())
     }
 }
@@ -113,6 +113,16 @@ where
         let edge = self.edge;
         let mesh = self.mesh;
         edge.map(|edge| EdgeView::new(mesh, edge))
+    }
+
+    pub fn reachable_incoming_edges(
+        &self,
+    ) -> EdgeCirculator<&Mesh<G, Inconsistent>, G, Inconsistent> {
+        EdgeCirculator::new(self.with_mesh_ref())
+    }
+
+    pub fn reachable_faces(&self) -> FaceCirculator<&Mesh<G, Inconsistent>, G, Inconsistent> {
+        FaceCirculator::from_edge_circulator(self.reachable_incoming_edges())
     }
 }
 
@@ -272,22 +282,24 @@ where
     }
 }
 
-pub struct EdgeCirculator<M, G>
+pub struct EdgeCirculator<M, G, C = Consistent>
 where
-    M: AsRef<Mesh<G, Consistent>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
-    vertex: VertexView<M, G>,
+    vertex: VertexView<M, G, C>,
     edge: Option<EdgeKey>,
     breadcrumb: Option<EdgeKey>,
 }
 
-impl<M, G> EdgeCirculator<M, G>
+impl<M, G, C> EdgeCirculator<M, G, C>
 where
-    M: AsRef<Mesh<G, Consistent>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
-    fn new(vertex: VertexView<M, G>) -> Self {
+    fn new(vertex: VertexView<M, G, C>) -> Self {
         let edge = vertex.edge;
         EdgeCirculator {
             vertex: vertex,
@@ -315,25 +327,27 @@ where
     }
 }
 
-impl<'a, G> Iterator for EdgeCirculator<&'a Mesh<G, Consistent>, G>
+impl<'a, G, C> Iterator for EdgeCirculator<&'a Mesh<G, C>, G, C>
 where
     G: Geometry,
+    C: Consistency,
 {
-    type Item = EdgeView<&'a Mesh<G, Consistent>, G>;
+    type Item = EdgeView<&'a Mesh<G, C>, G, C>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        <EdgeCirculator<_, _>>::next(self).map(|edge| EdgeView::new(self.vertex.mesh, edge))
+        <EdgeCirculator<_, _, _>>::next(self).map(|edge| EdgeView::new(self.vertex.mesh, edge))
     }
 }
 
-impl<'a, G> Iterator for EdgeCirculator<&'a mut Mesh<G, Consistent>, G>
+impl<'a, G, C> Iterator for EdgeCirculator<&'a mut Mesh<G, C>, G, C>
 where
     G: Geometry,
+    C: Consistency,
 {
     type Item = OrphanEdgeView<'a, G>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        <EdgeCirculator<_, _>>::next(self).map(|edge| {
+        <EdgeCirculator<_, _, _>>::next(self).map(|edge| {
             OrphanEdgeView::new(
                 unsafe {
                     use std::mem;
@@ -356,20 +370,22 @@ where
     }
 }
 
-pub struct FaceCirculator<M, G>
+pub struct FaceCirculator<M, G, C = Consistent>
 where
-    M: AsRef<Mesh<G, Consistent>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
-    inner: EdgeCirculator<M, G>,
+    inner: EdgeCirculator<M, G, C>,
 }
 
-impl<M, G> FaceCirculator<M, G>
+impl<M, G, C> FaceCirculator<M, G, C>
 where
-    M: AsRef<Mesh<G, Consistent>>,
+    M: AsRef<Mesh<G, C>>,
     G: Geometry,
+    C: Consistency,
 {
-    fn from_edge_circulator(edges: EdgeCirculator<M, G>) -> Self {
+    fn from_edge_circulator(edges: EdgeCirculator<M, G, C>) -> Self {
         FaceCirculator { inner: edges }
     }
 
@@ -391,20 +407,23 @@ where
     }
 }
 
-impl<'a, G> Iterator for FaceCirculator<&'a Mesh<G, Consistent>, G>
+impl<'a, G, C> Iterator for FaceCirculator<&'a Mesh<G, C>, G, C>
 where
     G: Geometry,
+    C: Consistency,
 {
-    type Item = FaceView<&'a Mesh<G, Consistent>, G>;
+    type Item = FaceView<&'a Mesh<G, C>, G, C>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        <FaceCirculator<_, _>>::next(self).map(|face| FaceView::new(self.inner.vertex.mesh, face))
+        <FaceCirculator<_, _, _>>::next(self)
+            .map(|face| FaceView::new(self.inner.vertex.mesh, face))
     }
 }
 
-impl<'a, G> Iterator for FaceCirculator<&'a mut Mesh<G, Consistent>, G>
+impl<'a, G, C> Iterator for FaceCirculator<&'a mut Mesh<G, C>, G, C>
 where
     G: 'a + Geometry,
+    C: Consistency,
 {
     // This cannot be a `FaceView`, because that would alias the mutable
     // reference to the mesh. Instead, yield the key and a mutable reference to
@@ -413,7 +432,7 @@ where
     type Item = OrphanFaceView<'a, G>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        <FaceCirculator<_, _>>::next(self).map(|face| {
+        <FaceCirculator<_, _, _>>::next(self).map(|face| {
             OrphanFaceView::new(
                 unsafe {
                     use std::mem;

@@ -315,10 +315,14 @@ where
         vertices: &[VertexKey],
         geometry: (G::Edge, G::Face),
     ) -> Result<FaceKey, Error> {
-        // Before mutating the mesh, collect the incoming and outgoing edges
-        // for each vertex.
-        let ((incoming, outgoing), singularity) =
-            self.mesh.region_connectivity(self.mesh.region(vertices)?);
+        // Before mutating the mesh, verify that the region is not already
+        // occupied by a face and collect the incoming and outgoing edges for
+        // each vertex in the region.
+        let region = self.mesh.region(vertices)?;
+        if region.face().is_some() {
+            return Err(GraphError::TopologyConflict.into());
+        }
+        let ((incoming, outgoing), singularity) = self.mesh.reachable_region_connectivity(region);
         if singularity.is_some() {
             return Err(GraphError::TopologyMalformed
                 .context("non-manifold connectivity")
@@ -505,7 +509,7 @@ where
         if region.face().is_some() {
             return Err(GraphError::TopologyConflict.into());
         }
-        let ((incoming, outgoing), singularity) = self.mesh.region_connectivity(region);
+        let ((incoming, outgoing), singularity) = self.mesh.reachable_region_connectivity(region);
         // Insert composite edges and collect the interior edges. This is the
         // point of no return; the mesh has been mutated. Unwrap results.
         let edges = vertices

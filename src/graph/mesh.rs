@@ -622,8 +622,13 @@ where
             vertices,
         )
     }
+}
 
-    pub(in graph) fn region_connectivity(
+impl<G> Mesh<G, Inconsistent>
+where
+    G: Geometry,
+{
+    pub(in graph) fn reachable_region_connectivity(
         &self,
         region: Region,
     ) -> ((Connectivity, Connectivity), Option<Singularity>) {
@@ -637,8 +642,9 @@ where
                     *vertex,
                     self.vertex(*vertex)
                         .unwrap()
-                        .incoming_edges()
-                        .map(|edge| edge.opposite_edge().key())
+                        .reachable_incoming_edges()
+                        .flat_map(|edge| edge.opposite_edge())
+                        .map(|edge| edge.key())
                         .collect::<Vec<_>>(),
                 )
             })
@@ -651,13 +657,13 @@ where
                     *vertex,
                     self.vertex(*vertex)
                         .unwrap()
-                        .incoming_edges()
+                        .reachable_incoming_edges()
                         .map(|edge| edge.key())
                         .collect::<Vec<_>>(),
                 )
             })
             .collect::<HashMap<_, _>>();
-        // If only one vertex has any outgoing edges, then this face shares
+        // If only one vertex has any outgoing edges, then this region shares
         // exactly one vertex with other faces and is therefore non-manifold.
         //
         // This kind of non-manifold is not supported, but sometimes occurs
@@ -671,7 +677,7 @@ where
                     || {
                         let faces = self.vertex(*vertex)
                             .unwrap()
-                            .faces()
+                            .reachable_faces()
                             .map(|face| face.key())
                             .collect::<Vec<_>>();
                         Some((*vertex, faces))
