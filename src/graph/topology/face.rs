@@ -72,23 +72,26 @@ where
     G: Geometry,
 {
     pub fn to_key_topology(&self) -> FaceKeyTopology {
-        FaceKeyTopology::new(self.key, self.edges().map(|edge| edge.to_key_topology()))
+        FaceKeyTopology::new(
+            self.key,
+            self.interior_edges().map(|edge| edge.to_key_topology()),
+        )
     }
 
     pub fn arity(&self) -> usize {
-        self.edges().count()
+        self.interior_edges().count()
     }
 
     pub fn vertices(&self) -> VertexCirculator<&Mesh<G, Consistent>, G> {
-        VertexCirculator::from_edge_circulator(self.edges())
+        VertexCirculator::from_edge_circulator(self.interior_edges())
     }
 
-    pub fn edges(&self) -> EdgeCirculator<&Mesh<G, Consistent>, G> {
+    pub fn interior_edges(&self) -> EdgeCirculator<&Mesh<G, Consistent>, G> {
         EdgeCirculator::new(self.with_mesh_ref())
     }
 
     pub fn faces(&self) -> FaceCirculator<&Mesh<G, Consistent>, G> {
-        FaceCirculator::from_edge_circulator(self.edges())
+        FaceCirculator::from_edge_circulator(self.interior_edges())
     }
 
     // TODO: Consider exposing this to user code, perhaps via an iterator and,
@@ -370,7 +373,7 @@ impl FaceKeyTopology {
         self.key
     }
 
-    pub fn edges(&self) -> &[EdgeKeyTopology] {
+    pub fn interior_edges(&self) -> &[EdgeKeyTopology] {
         self.edges.as_slice()
     }
 }
@@ -614,7 +617,7 @@ where
             Some(face) => face,
             _ => return Err(GraphError::TopologyNotFound.into()),
         };
-        let perimeter = face.edges()
+        let perimeter = face.interior_edges()
             .map(|edge| (edge.vertex, edge.next_edge().vertex))
             .collect::<Vec<_>>();
         if perimeter.len() <= 3 {
@@ -665,7 +668,7 @@ where
         (
             source
                 .to_key_topology()
-                .edges()
+                .interior_edges()
                 .iter()
                 .map(|topology| {
                     (
@@ -690,7 +693,10 @@ where
     // TODO: Is it always correct to reverse the order of the opposite
     //       face's edges?
     // Re-insert the edges of the faces and join the mutual edges.
-    for (source, destination) in sources.into_iter().zip(destination.edges().iter().rev()) {
+    for (source, destination) in sources
+        .into_iter()
+        .zip(destination.interior_edges().iter().rev())
+    {
         let (a, b) = source.0.vertices();
         let (c, d) = destination.vertices();
         let ab = mutation.insert_edge((a, b), source.1.clone()).unwrap();
@@ -775,7 +781,7 @@ mod tests {
         let face = mesh.faces().nth(0).unwrap();
 
         // All faces should be triangles and should have three edges.
-        assert_eq!(3, face.edges().count());
+        assert_eq!(3, face.interior_edges().count());
     }
 
     #[test]

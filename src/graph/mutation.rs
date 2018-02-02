@@ -385,7 +385,7 @@ where
             }
             // Find any boundary edges. Once this face is removed, such edges
             // will have no face on either side.
-            face.edges()
+            face.interior_edges()
                 .flat_map(|edge| edge.into_boundary_edge())
                 .map(|edge| edge.key())
                 .collect::<Vec<_>>()
@@ -548,7 +548,7 @@ where
             };
             // Find any boundary edges. Once this face is removed, such edges
             // will have no face on either side.
-            face.edges()
+            face.interior_edges()
                 .flat_map(|edge| edge.into_boundary_edge())
                 .map(|edge| edge.key())
                 .collect::<Vec<_>>()
