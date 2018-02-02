@@ -247,13 +247,12 @@ where
         Ok(())
     }
 
-    fn disconnect_face_interior(&mut self, face: FaceKey) -> Result<(), Error> {
-        for mut edge in self.mesh
-            .face_mut(face)
-            .ok_or_else(|| Error::from(GraphError::TopologyNotFound))?
-            .edges_mut()
-        {
-            edge.face = None;
+    fn disconnect_face_interior(&mut self, edges: &[EdgeKey]) -> Result<(), Error> {
+        for ab in edges {
+            self.mesh
+                .edge_mut(*ab)
+                .ok_or_else(|| Error::from(GraphError::TopologyNotFound))?
+                .face = None;
         }
         Ok(())
     }
@@ -356,21 +355,7 @@ where
             };
             // Iterate over the set of vertices shared between the face and all
             // of its neighbors. These are potential singularities.
-            let vertices = face.faces()
-                .map(|face| {
-                    face.vertices()
-                        .map(|vertex| vertex.key())
-                        .collect::<HashSet<_>>()
-                })
-                .fold(
-                    face.vertices()
-                        .map(|vertex| vertex.key())
-                        .collect::<HashSet<_>>(),
-                    |intersection, vertices| {
-                        intersection.intersection(&vertices).cloned().collect()
-                    },
-                );
-            for vertex in vertices {
+            for vertex in face.mutuals() {
                 // Circulate (in order) over the neighboring faces of the
                 // potential singularity, ignoring the face to be removed.
                 // Count the number of gaps, where neighboring faces do not
@@ -517,10 +502,14 @@ where
         vertices: &[VertexKey],
         geometry: (G::Edge, G::Face),
     ) -> Result<FaceKey, Error> {
-        // Before mutating the mesh, collect the incoming and outgoing edges
-        // for each vertex.
-        let ((incoming, outgoing), singularity) =
-            self.mesh.region_connectivity(self.mesh.region(vertices)?);
+        // Before mutating the mesh, verify that the region is not already
+        // occupied by a face and collect the incoming and outgoing edges for
+        // each vertex in the region.
+        let region = self.mesh.region(vertices)?;
+        if region.face().is_some() {
+            return Err(GraphError::TopologyConflict.into());
+        }
+        let ((incoming, outgoing), singularity) = self.mesh.region_connectivity(region);
         // Insert composite edges and collect the interior edges. This is the
         // point of no return; the mesh has been mutated. Unwrap results.
         let edges = vertices

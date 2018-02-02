@@ -2,7 +2,7 @@ use arrayvec::ArrayVec;
 use failure::{Error, Fail};
 use itertools::Itertools;
 use num::{Integer, NumCast, Unsigned};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::iter::FromIterator;
 use std::marker::PhantomData;
@@ -182,11 +182,14 @@ where
 ///
 /// See `Mesh::region`.
 #[derive(Clone, Copy, Debug)]
-pub struct Region<'a>(&'a [VertexKey]);
+pub struct Region<'a> {
+    vertices: &'a [VertexKey],
+    face: Option<FaceKey>,
+}
 
 impl<'a> Region<'a> {
-    pub fn as_vertices(&self) -> &[VertexKey] {
-        self.0
+    pub fn vertices(&self) -> &'a [VertexKey] {
+        self.vertices
     }
 }
 
@@ -602,17 +605,22 @@ where
         if vertices.iter().any(|vertex| self.vertex(*vertex).is_none()) {
             return Err(GraphError::TopologyNotFound.into());
         }
-        // Fail if the interior is already occupied by a face.
-        if vertices
+        let faces = vertices
             .perimeter()
             .flat_map(|ab| self.edge(ab.into()))
-            .any(|edge| edge.face().is_some())
-        {
-            return Err(GraphError::TopologyConflict
-                .context("interior edge has face")
+            .flat_map(|edge| edge.face())
+            .map(|face| face.key())
+            .collect::<HashSet<_>>();
+        // Fail if the edges refer to more than one face.
+        if faces.len() > 1 {
+            return Err(GraphError::TopologyMalformed
+                .context("non-closed region")
                 .into());
         }
-        Ok(Region(vertices))
+        Ok(Region {
+            vertices,
+            face: faces.into_iter().next(),
+        })
     }
 
     pub(in graph) fn region_connectivity(
@@ -622,7 +630,7 @@ where
         // Get the outgoing and incoming edges of the vertices forming the
         // perimeter.
         let outgoing = region
-            .as_vertices()
+            .vertices()
             .iter()
             .map(|vertex| {
                 (
@@ -636,7 +644,7 @@ where
             })
             .collect::<HashMap<_, _>>();
         let incoming = region
-            .as_vertices()
+            .vertices()
             .iter()
             .map(|vertex| {
                 (

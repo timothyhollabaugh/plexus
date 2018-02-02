@@ -1,4 +1,5 @@
 use failure::Error;
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::ops::{Add, Deref, DerefMut, Mul};
 
@@ -88,6 +89,28 @@ where
 
     pub fn faces(&self) -> FaceCirculator<&Mesh<G, Consistent>, G> {
         FaceCirculator::from_edge_circulator(self.edges())
+    }
+
+    // TODO: Consider exposing this to user code, perhaps via an iterator and,
+    //       if possible, as views instead of keys.
+    // Gets the mutuals of a face. A mutual is a vertex shared between a face
+    // and all of its neighboring faces. There are only a small set of
+    // configurations in which this can occur, such as a "radial" mutual with
+    // faces winding around a shared vertex or "linear" mutuals where a strip
+    // of faces terminates with two faces being connected by shared vertices.
+    pub(in graph) fn mutuals(&self) -> HashSet<VertexKey> {
+        self.faces()
+            .map(|face| {
+                face.vertices()
+                    .map(|vertex| vertex.key())
+                    .collect::<HashSet<_>>()
+            })
+            .fold(
+                self.vertices()
+                    .map(|vertex| vertex.key())
+                    .collect::<HashSet<_>>(),
+                |intersection, vertices| intersection.intersection(&vertices).cloned().collect(),
+            )
     }
 }
 
