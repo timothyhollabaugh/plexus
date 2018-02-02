@@ -451,7 +451,6 @@ where
     }
 
     pub fn commit(self) -> Result<Mesh<G, Consistent>, Error> {
-        let mesh = self.mutation.mesh.into_consistency();
         for (vertex, faces) in self.singularities {
             // TODO: This will not detect exactly two faces joined by a single
             //       vertex. This is technically supported, but perhaps should
@@ -459,11 +458,11 @@ where
             // Determine if any unreachable faces exist in the mesh. This
             // cannot happen if the mesh is ultimately a manifold and edge
             // connectivity heals.
-            if let Some(vertex) = mesh.vertex(vertex) {
+            if let Some(vertex) = self.mesh.vertex(vertex) {
                 for unreachable in
-                    faces.difference(&vertex.faces().map(|face| face.key()).collect())
+                    faces.difference(&vertex.reachable_faces().map(|face| face.key()).collect())
                 {
-                    if mesh.face(*unreachable).is_some() {
+                    if self.mesh.face(*unreachable).is_some() {
                         return Err(GraphError::TopologyMalformed
                             .context("non-manifold connectivity")
                             .into());
@@ -471,7 +470,7 @@ where
                 }
             }
         }
-        Ok(mesh)
+        Ok(self.mutation.mesh.into_consistency())
     }
 }
 
