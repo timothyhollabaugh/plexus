@@ -358,6 +358,44 @@ where
     pub fn faces_mut(&mut self) -> MeshIterMut<OrphanFaceMut<G>, G, C> {
         MeshIterMut::new(self.faces.iter_mut())
     }
+
+    pub(in graph) fn region<'a>(&self, vertices: &'a [VertexKey]) -> Result<Region<'a>, Error> {
+        // A face requires at least three vertices (edges). This invariant
+        // should be maintained by any code that is able to mutate the mesh,
+        // such that code manipulating faces (via `FaceView`) may assume this
+        // is true. Panics resulting from faces with fewer than three vertices
+        // are bugs.
+        if vertices.len() < 3 {
+            return Err(GraphError::TopologyMalformed
+                .context("non-polygonal arity")
+                .into());
+        }
+        if vertices.len() != vertices.iter().unique().count() {
+            return Err(GraphError::TopologyMalformed
+                .context("non-manifold bounds")
+                .into());
+        }
+        // Fail if any vertex is not present.
+        if vertices.iter().any(|vertex| self.vertex(*vertex).is_none()) {
+            return Err(GraphError::TopologyNotFound.into());
+        }
+        let faces = vertices
+            .perimeter()
+            .flat_map(|ab| self.edge(ab.into()))
+            .flat_map(|edge| edge.face())
+            .map(|face| face.key())
+            .collect::<HashSet<_>>();
+        // Fail if the edges refer to more than one face.
+        if faces.len() > 1 {
+            return Err(GraphError::TopologyMalformed
+                .context("non-closed region")
+                .into());
+        }
+        Ok(Region {
+            vertices,
+            face: faces.into_iter().next(),
+        })
+    }
 }
 
 impl<G> Mesh<G, Consistent>
@@ -583,44 +621,6 @@ where
             (0..vertices.len()).map(|index| N::from(index).unwrap()),
             vertices,
         )
-    }
-
-    pub(in graph) fn region<'a>(&self, vertices: &'a [VertexKey]) -> Result<Region<'a>, Error> {
-        // A face requires at least three vertices (edges). This invariant
-        // should be maintained by any code that is able to mutate the mesh,
-        // such that code manipulating faces (via `FaceView`) may assume this
-        // is true. Panics resulting from faces with fewer than three vertices
-        // are bugs.
-        if vertices.len() < 3 {
-            return Err(GraphError::TopologyMalformed
-                .context("non-polygonal arity")
-                .into());
-        }
-        if vertices.len() != vertices.iter().unique().count() {
-            return Err(GraphError::TopologyMalformed
-                .context("non-manifold bounds")
-                .into());
-        }
-        // Fail if any vertex is not present.
-        if vertices.iter().any(|vertex| self.vertex(*vertex).is_none()) {
-            return Err(GraphError::TopologyNotFound.into());
-        }
-        let faces = vertices
-            .perimeter()
-            .flat_map(|ab| self.edge(ab.into()))
-            .flat_map(|edge| edge.face())
-            .map(|face| face.key())
-            .collect::<HashSet<_>>();
-        // Fail if the edges refer to more than one face.
-        if faces.len() > 1 {
-            return Err(GraphError::TopologyMalformed
-                .context("non-closed region")
-                .into());
-        }
-        Ok(Region {
-            vertices,
-            face: faces.into_iter().next(),
-        })
     }
 
     pub(in graph) fn region_connectivity(

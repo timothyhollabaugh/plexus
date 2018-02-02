@@ -32,10 +32,6 @@ where
         geometry: (G::Edge, G::Face),
     ) -> Result<FaceKey, Error>;
 
-    // TODO: Face removal raises questions about "empty regions". Should a mesh
-    //       be allowed to have "holes" in it? If not, what about orphaned
-    //       edges? If meshes need not be continuous, then "holes" should
-    //       probably be allowed.
     fn remove_face(&mut self, face: FaceKey) -> Result<Face<G>, Error>;
 }
 
