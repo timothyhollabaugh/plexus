@@ -191,6 +191,10 @@ impl<'a> Region<'a> {
     pub fn vertices(&self) -> &'a [VertexKey] {
         self.vertices
     }
+
+    pub fn face(&self) -> &Option<FaceKey> {
+        &self.face
+    }
 }
 
 /// Vertex-bounded region connectivity.
@@ -360,7 +364,7 @@ where
     }
 
     pub(in graph) fn region<'a>(&self, vertices: &'a [VertexKey]) -> Result<Region<'a>, Error> {
-        // A face requires at least three vertices (edges). This invariant
+        // A region requires at least three vertices (edges). This invariant
         // should be maintained by any code that is able to mutate the mesh,
         // such that code manipulating faces (via `FaceView`) may assume this
         // is true. Panics resulting from faces with fewer than three vertices
@@ -382,8 +386,7 @@ where
         let faces = vertices
             .perimeter()
             .flat_map(|ab| self.edge(ab.into()))
-            .flat_map(|edge| edge.face())
-            .map(|face| face.key())
+            .flat_map(|edge| edge.face)
             .collect::<HashSet<_>>();
         // Fail if the edges refer to more than one face.
         if faces.len() > 1 {
@@ -395,6 +398,69 @@ where
             vertices,
             face: faces.into_iter().next(),
         })
+    }
+
+    pub(in graph) fn reachable_region_connectivity(
+        &self,
+        region: Region,
+    ) -> ((Connectivity, Connectivity), Option<Singularity>) {
+        // Get the outgoing and incoming edges of the vertices forming the
+        // perimeter.
+        let outgoing = region
+            .vertices()
+            .iter()
+            .map(|vertex| {
+                (
+                    *vertex,
+                    self.vertex(*vertex)
+                        .unwrap()
+                        .reachable_incoming_edges()
+                        .flat_map(|edge| edge.opposite)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let incoming = region
+            .vertices()
+            .iter()
+            .map(|vertex| {
+                (
+                    *vertex,
+                    self.vertex(*vertex)
+                        .unwrap()
+                        .reachable_incoming_edges()
+                        .map(|edge| edge.key())
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        // If only one vertex has any outgoing edges, then this region shares
+        // exactly one vertex with other faces and is therefore non-manifold.
+        //
+        // This kind of non-manifold is not supported, but sometimes occurs
+        // during a batch mutation. Details of the singularity vertex are
+        // emitted and handled by calling code, either raising an error or
+        // waiting to validate after a batch mutation is complete.
+        let singularity = {
+            let mut outgoing = outgoing.iter().filter(|&(_, edges)| !edges.is_empty());
+            if let Some((vertex, _)) = outgoing.next() {
+                outgoing.next().map_or_else(
+                    || {
+                        let faces = self.vertex(*vertex)
+                            .unwrap()
+                            .reachable_faces()
+                            .map(|face| face.key())
+                            .collect::<Vec<_>>();
+                        Some((*vertex, faces))
+                    },
+                    |_| None,
+                )
+            }
+            else {
+                None
+            }
+        };
+        ((incoming, outgoing), singularity)
     }
 }
 
@@ -621,75 +687,6 @@ where
             (0..vertices.len()).map(|index| N::from(index).unwrap()),
             vertices,
         )
-    }
-}
-
-impl<G> Mesh<G, Inconsistent>
-where
-    G: Geometry,
-{
-    pub(in graph) fn reachable_region_connectivity(
-        &self,
-        region: Region,
-    ) -> ((Connectivity, Connectivity), Option<Singularity>) {
-        // Get the outgoing and incoming edges of the vertices forming the
-        // perimeter.
-        let outgoing = region
-            .vertices()
-            .iter()
-            .map(|vertex| {
-                (
-                    *vertex,
-                    self.vertex(*vertex)
-                        .unwrap()
-                        .reachable_incoming_edges()
-                        .flat_map(|edge| edge.opposite_edge())
-                        .map(|edge| edge.key())
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        let incoming = region
-            .vertices()
-            .iter()
-            .map(|vertex| {
-                (
-                    *vertex,
-                    self.vertex(*vertex)
-                        .unwrap()
-                        .reachable_incoming_edges()
-                        .map(|edge| edge.key())
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        // If only one vertex has any outgoing edges, then this region shares
-        // exactly one vertex with other faces and is therefore non-manifold.
-        //
-        // This kind of non-manifold is not supported, but sometimes occurs
-        // during a batch mutation. Details of the singularity vertex are
-        // emitted and handled by calling code, either raising an error or
-        // waiting to validate after a batch mutation is complete.
-        let singularity = {
-            let mut outgoing = outgoing.iter().filter(|&(_, edges)| !edges.is_empty());
-            if let Some((vertex, _)) = outgoing.next() {
-                outgoing.next().map_or_else(
-                    || {
-                        let faces = self.vertex(*vertex)
-                            .unwrap()
-                            .reachable_faces()
-                            .map(|face| face.key())
-                            .collect::<Vec<_>>();
-                        Some((*vertex, faces))
-                    },
-                    |_| None,
-                )
-            }
-            else {
-                None
-            }
-        };
-        ((incoming, outgoing), singularity)
     }
 }
 

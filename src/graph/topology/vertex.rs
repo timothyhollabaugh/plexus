@@ -41,6 +41,14 @@ where
         self.key
     }
 
+    pub(in graph) fn reachable_incoming_edges(&self) -> EdgeCirculator<&Mesh<G, C>, G, C> {
+        EdgeCirculator::new(self.with_mesh_ref())
+    }
+
+    pub(in graph) fn reachable_faces(&self) -> FaceCirculator<&Mesh<G, C>, G, C> {
+        FaceCirculator::from_edge_circulator(self.reachable_incoming_edges())
+    }
+
     // Resolve the `M` parameter to a concrete reference.
     fn with_mesh_ref(&self) -> VertexView<&Mesh<G, C>, G, C> {
         VertexView::new(self.mesh.as_ref(), self.key)
@@ -113,16 +121,6 @@ where
         let edge = self.edge;
         let mesh = self.mesh;
         edge.map(|edge| EdgeView::new(mesh, edge))
-    }
-
-    pub fn reachable_incoming_edges(
-        &self,
-    ) -> EdgeCirculator<&Mesh<G, Inconsistent>, G, Inconsistent> {
-        EdgeCirculator::new(self.with_mesh_ref())
-    }
-
-    pub fn reachable_faces(&self) -> FaceCirculator<&Mesh<G, Inconsistent>, G, Inconsistent> {
-        FaceCirculator::from_edge_circulator(self.reachable_incoming_edges())
     }
 }
 
