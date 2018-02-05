@@ -1,11 +1,13 @@
 use failure::{Error, Fail};
 use std::collections::{HashMap, HashSet};
+use std::marker::PhantomData;
 use std::mem;
 use std::ops::{Deref, DerefMut};
 
 use geometry::Geometry;
 use graph::{GraphError, Perimeter};
-use graph::mesh::{Connectivity, Consistent, Edge, Face, Inconsistent, Mesh, Vertex};
+use graph::mesh::{Connectivity, Consistency, Consistent, Edge, Face, Inconsistent, Mesh, Region,
+                  Singularity, Vertex};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
 
 trait Mutate<G>
@@ -26,13 +28,86 @@ pub trait ModalMutation<G>: Deref<Target = Mutation<G>> + DerefMut
 where
     G: Geometry,
 {
-    fn insert_face(
-        &mut self,
-        vertices: &[VertexKey],
-        geometry: (G::Edge, G::Face),
-    ) -> Result<FaceKey, Error>;
+    fn insert_face(&mut self, insertion: FaceInsertion<G>) -> Result<FaceKey, Error>;
 
-    fn remove_face(&mut self, face: FaceKey) -> Result<Face<G>, Error>;
+    fn remove_face(&mut self, removal: FaceRemoval<G>) -> Result<Face<G>, Error>;
+}
+
+pub struct FaceInsertion<'a, G>
+where
+    G: Geometry,
+{
+    region: Region<'a>,
+    connectivity: (Connectivity, Connectivity),
+    singularity: Option<Singularity>,
+    geometry: (G::Edge, G::Face),
+}
+
+impl<'a, G> FaceInsertion<'a, G>
+where
+    G: Geometry,
+{
+    pub fn prepare<C>(
+        mesh: &Mesh<G, C>,
+        vertices: &'a [VertexKey],
+        geometry: (G::Edge, G::Face),
+    ) -> Result<Self, Error>
+    where
+        C: Consistency,
+    {
+        // Verify that the region is not already occupied by a face and collect
+        // the incoming and outgoing edges for each vertex in the region.
+        let region = mesh.region(vertices)?;
+        if region.face().is_some() {
+            return Err(GraphError::TopologyConflict.into());
+        }
+        let (connectivity, singularity) = mesh.reachable_region_connectivity(region);
+        Ok(FaceInsertion {
+            region,
+            connectivity,
+            singularity,
+            geometry,
+        })
+    }
+}
+
+pub struct FaceRemoval<G>
+where
+    G: Geometry,
+{
+    abc: FaceKey,
+    mutuals: Vec<VertexKey>,
+    boundaries: Vec<EdgeKey>,
+    phantom: PhantomData<G>,
+}
+
+impl<G> FaceRemoval<G>
+where
+    G: Geometry,
+{
+    pub fn prepare<C>(mesh: &Mesh<G, Consistent>, abc: FaceKey) -> Result<Self, Error> {
+        let (mutuals, boundaries) = {
+            let face = match mesh.face(abc) {
+                Some(face) => face,
+                _ => return Err(GraphError::TopologyNotFound.into()),
+            };
+            (
+                face.mutuals().into_iter().collect(),
+                // Find any boundary edges. Once this face is removed, such edges
+                // will have no face on either side.
+                face.interior_edges()
+                    .flat_map(|edge| edge.into_boundary_edge())
+                    .map(|edge| edge.key())
+                    .collect(),
+            )
+        };
+        Ok(FaceRemoval {
+            abc,
+            mutuals,
+            boundaries,
+            phantom: PhantomData,
+        })
+    }
 }
 
 /// Mesh mutation.
@@ -310,19 +385,15 @@ impl<G> ModalMutation<G> for ImmediateMutation<G>
 where
     G: Geometry,
 {
-    fn insert_face(
-        &mut self,
-        vertices: &[VertexKey],
-        geometry: (G::Edge, G::Face),
-    ) -> Result<FaceKey, Error> {
+    fn insert_face(&mut self, insertion: FaceInsertion<G>) -> Result<FaceKey, Error> {
+        let FaceInsertion {
+            region,
+            connectivity,
+            singularity,
+            geometry,
+        } = insertion;
         // Before mutating the mesh, verify that the region is not already
-        // occupied by a face and collect the incoming and outgoing edges for
-        // each vertex in the region.
-        let region = self.mesh.region(vertices)?;
-        if region.face().is_some() {
-            return Err(GraphError::TopologyConflict.into());
-        }
-        let ((incoming, outgoing), singularity) = self.mesh.reachable_region_connectivity(region);
+        // occupied by a face.
         if singularity.is_some() {
             return Err(GraphError::TopologyMalformed
                 .context("non-manifold connectivity")
@@ -330,7 +401,8 @@ where
         }
         // Insert composite edges and collect the interior edges. This is the
         // point of no return; the mesh has been mutated. Unwrap results.
-        let edges = vertices
+        let edges = region
+            .vertices()
             .perimeter()
             .map(|ab| {
                 self.get_or_insert_composite_edge(ab, geometry.0.clone())
@@ -342,59 +414,54 @@ where
             .faces
             .insert_with_generator(Face::new(edges[0], geometry.1));
         self.connect_face_interior(&edges, face).unwrap();
-        self.connect_face_exterior(&edges, (incoming, outgoing))
-            .unwrap();
+        self.connect_face_exterior(&edges, connectivity).unwrap();
         Ok(face)
     }
 
-    fn remove_face(&mut self, face: FaceKey) -> Result<Face<G>, Error> {
-        let edges = {
-            let face = match self.mesh.face(face) {
-                Some(face) => face,
-                _ => return Err(GraphError::TopologyNotFound.into()),
-            };
-            // Iterate over the set of vertices shared between the face and all
-            // of its neighbors. These are potential singularities.
-            for vertex in face.mutuals() {
-                // Circulate (in order) over the neighboring faces of the
-                // potential singularity, ignoring the face to be removed.
-                // Count the number of gaps, where neighboring faces do not
-                // share any edges. Because a face is being ignored, exactly
-                // one gap is expected. If any additional gaps exist, then
-                // removal will create a singularity.
-                let vertex = self.mesh.vertex(vertex).unwrap();
-                let n = vertex
-                    .faces()
-                    .filter(|neighbor| neighbor.key() != face.key())
-                    .collect::<Vec<_>>()
-                    .iter()
-                    .perimeter()
-                    .filter(|&(previous, next)| {
-                        let exterior = previous
-                            .edges()
-                            .map(|edge| edge.into_opposite_edge())
-                            .map(|edge| edge.key())
-                            .collect::<HashSet<_>>();
-                        let interior = next.edges().map(|edge| edge.key()).collect::<HashSet<_>>();
-                        exterior.intersection(&interior).count() == 0
-                    })
-                    .count();
-                if n > 1 {
-                    return Err(GraphError::TopologyConflict.into());
-                }
-            }
-            // Find any boundary edges. Once this face is removed, such edges
-            // will have no face on either side.
-            face.interior_edges()
-                .flat_map(|edge| edge.into_boundary_edge())
-                .map(|edge| edge.key())
+    fn remove_face(&mut self, removal: FaceRemoval<G>) -> Result<Face<G>, Error> {
+        let FaceRemoval {
+            abc,
+            mutuals,
+            boundaries,
+            ..
+        } = removal;
+        // Iterate over the set of vertices shared between the face and all
+        // of its neighbors. These are potential singularities.
+        for vertex in mutuals {
+            // Circulate (in order) over the neighboring faces of the
+            // potential singularity, ignoring the face to be removed.
+            // Count the number of gaps, where neighboring faces do not
+            // share any edges. Because a face is being ignored, exactly
+            // one gap is expected. If any additional gaps exist, then
+            // removal will create a singularity.
+            let vertex = self.mesh.vertex(vertex).unwrap();
+            let n = vertex
+                .faces()
+                .filter(|face| face.key() != abc)
                 .collect::<Vec<_>>()
-        };
-        self.disconnect_face_interior(face)?;
-        for edge in edges {
-            self.remove_composite_edge(edge).unwrap();
+                .iter()
+                .perimeter()
+                .filter(|&(previous, next)| {
+                    let exterior = previous
+                        .interior_edges()
+                        .map(|edge| edge.into_opposite_edge())
+                        .map(|edge| edge.key())
+                        .collect::<HashSet<_>>();
+                    let interior = next.interior_edges()
+                        .map(|edge| edge.key())
+                        .collect::<HashSet<_>>();
+                    exterior.intersection(&interior).count() == 0
+                })
+                .count();
+            if n > 1 {
+                return Err(GraphError::TopologyConflict.into());
+            }
         }
-        Ok(self.mesh.faces.remove(&face).unwrap())
+        self.disconnect_face_interior(abc).unwrap();
+        for ab in boundaries {
+            self.remove_composite_edge(ab).unwrap();
+        }
+        Ok(self.mesh.faces.remove(&abc).unwrap())
     }
 }
 
@@ -496,22 +563,17 @@ impl<G> ModalMutation<G> for BatchMutation<G>
 where
     G: Geometry,
 {
-    fn insert_face(
-        &mut self,
-        vertices: &[VertexKey],
-        geometry: (G::Edge, G::Face),
-    ) -> Result<FaceKey, Error> {
-        // Before mutating the mesh, verify that the region is not already
-        // occupied by a face and collect the incoming and outgoing edges for
-        // each vertex in the region.
-        let region = self.mesh.region(vertices)?;
-        if region.face().is_some() {
-            return Err(GraphError::TopologyConflict.into());
-        }
-        let ((incoming, outgoing), singularity) = self.mesh.reachable_region_connectivity(region);
+    fn insert_face(&mut self, insertion: FaceInsertion<G>) -> Result<FaceKey, Error> {
+        let FaceInsertion {
+            region,
+            connectivity,
+            singularity,
+            geometry,
+        } = insertion;
         // Insert composite edges and collect the interior edges. This is the
         // point of no return; the mesh has been mutated. Unwrap results.
-        let edges = vertices
+        let edges = region
+            .vertices()
             .perimeter()
             .map(|ab| {
                 self.get_or_insert_composite_edge(ab, geometry.0.clone())
@@ -532,31 +594,24 @@ where
             faces.insert(face);
         }
         self.connect_face_interior(&edges, face).unwrap();
-        self.connect_face_exterior(&edges, (incoming, outgoing))
-            .unwrap();
+        self.connect_face_exterior(&edges, connectivity).unwrap();
         Ok(face)
     }
 
     // TODO: This should participate in consistency checks. Removing a face
     //       could, for example, lead to singularities.
-    fn remove_face(&mut self, face: FaceKey) -> Result<Face<G>, Error> {
-        let edges = {
-            let face = match self.mesh.face(face) {
-                Some(face) => face,
-                _ => return Err(GraphError::TopologyNotFound.into()),
-            };
-            // Find any boundary edges. Once this face is removed, such edges
-            // will have no face on either side.
-            face.interior_edges()
-                .flat_map(|edge| edge.into_boundary_edge())
-                .map(|edge| edge.key())
-                .collect::<Vec<_>>()
-        };
-        self.disconnect_face_interior(face)?;
-        for edge in edges {
-            self.remove_composite_edge(edge).unwrap();
+    fn remove_face(&mut self, removal: FaceRemoval<G>) -> Result<Face<G>, Error> {
+        let FaceRemoval {
+            abc,
+            mutuals,
+            boundaries,
+            ..
+        } = removal;
+        self.disconnect_face_interior(abc).unwrap();
+        for ab in boundaries {
+            self.remove_composite_edge(ab).unwrap();
         }
-        Ok(self.mesh.faces.remove(&face).unwrap())
+        Ok(self.mesh.faces.remove(&abc).unwrap())
     }
 }
 

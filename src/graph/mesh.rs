@@ -15,10 +15,11 @@ use geometry::Geometry;
 use geometry::convert::{FromGeometry, FromInteriorGeometry, IntoGeometry, IntoInteriorGeometry};
 use graph::{GraphError, Perimeter};
 use graph::geometry::FaceCentroid;
-use graph::mutation::{BatchMutation, ModalMutation};
+use graph::mutation::{BatchMutation, FaceInsertion, ModalMutation};
 use graph::storage::{EdgeKey, FaceKey, Storage, StorageIter, StorageIterMut, VertexKey};
-use graph::topology::{face, EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut,
+use graph::topology::{EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut,
                       OrphanVertexMut, OrphanView, Topological, VertexMut, VertexRef, View};
+use graph::topology::face::{self, FaceTriangulation};
 
 pub trait Consistency {}
 
@@ -553,7 +554,11 @@ where
                     .get(index)
                     .ok_or_else(|| Error::from(GraphError::TopologyNotFound))?);
             }
-            mutation.insert_face(&perimeter, Default::default())?;
+            mutation.insert_face(FaceInsertion::prepare(
+                mutation.as_mesh(),
+                &perimeter,
+                Default::default(),
+            )?)?;
         }
         mutation.commit()
     }
@@ -563,12 +568,17 @@ where
     where
         G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
     {
-        let keys = self.faces.keys().cloned().collect::<Vec<_>>();
+        let triangulations = self.faces
+            .keys()
+            .cloned()
+            .flat_map(|key| FaceTriangulation::prepare(self, key.into()).ok())
+            .collect::<Vec<_>>();
         let mut mutation = BatchMutation::replace(self, Mesh::empty());
-        for key in keys {
-            let _ = face::triangulate(&mut *mutation, key.into());
+        for triangulation in triangulations {
+            let _ = face::triangulate(&mut *mutation, triangulation);
         }
-        mutation.commit().map(|_| ())
+        mutation.commit().unwrap();
+        Ok(())
     }
 
     /// Creates a mesh buffer from the mesh.
@@ -769,7 +779,10 @@ where
                 perimeter.push(vertices[index]);
             }
             mutation
-                .insert_face(&perimeter, Default::default())
+                .insert_face(
+                    FaceInsertion::prepare(mutation.as_mesh(), &perimeter, Default::default())
+                        .unwrap(),
+                )
                 .unwrap();
         }
         mutation.commit().unwrap()

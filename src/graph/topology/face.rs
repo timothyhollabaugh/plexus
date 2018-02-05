@@ -9,7 +9,7 @@ use graph::{GraphError, Perimeter};
 use graph::geometry::{FaceCentroid, FaceNormal};
 use graph::geometry::alias::{ScaledFaceNormal, VertexPosition};
 use graph::mesh::{Consistency, Consistent, Edge, Face, Mesh, Vertex};
-use graph::mutation::{BatchMutation, ImmediateMutation, ModalMutation};
+use graph::mutation::{BatchMutation, FaceInsertion, FaceRemoval, ImmediateMutation, ModalMutation};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
 use graph::topology::{edge, EdgeKeyTopology, EdgeView, OrphanEdgeView, OrphanVertexView,
                       OrphanView, Topological, VertexView, View};
@@ -143,8 +143,9 @@ where
         let FaceView {
             mesh, key: source, ..
         } = self;
+        let join = FaceJoin::prepare(&*mesh, source, destination)?;
         let mut mutation = BatchMutation::replace(mesh, Mesh::empty());
-        join(&mut *mutation, source, destination)?;
+        join(&mut *mutation, join)?;
         mutation.commit()?;
         Ok(())
     }
@@ -168,8 +169,9 @@ where
         self,
     ) -> Result<Option<VertexView<&'a mut Mesh<G, Consistent>, G, Consistent>>, Error> {
         let FaceView { mesh, key: abc, .. } = self;
+        let triangulation = FaceTriangulation::prepare(&*mesh, abc)?;
         let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
-        Ok(match triangulate(&mut *mutation, abc)? {
+        Ok(match triangulate(&mut *mutation, triangulation)? {
             Some(vertex) => Some(VertexView::new(mutation.commit().unwrap(), vertex)),
             _ => None,
         })
@@ -201,8 +203,9 @@ where
         VertexPosition<G>: Add<ScaledFaceNormal<G, T>, Output = VertexPosition<G>> + Clone,
     {
         let FaceView { mesh, key: abc, .. } = self;
+        let extrusion = FaceExtrusion::prepare(&*mesh, abc, distance)?;
         let mut mutation = BatchMutation::replace(mesh, Mesh::empty());
-        let face = extrude(&mut *mutation, abc, distance)?;
+        let face = extrude(&mut *mutation, extrusion)?;
         Ok(FaceView::new(mutation.commit().unwrap(), face))
     }
 }
@@ -604,92 +607,173 @@ where
     }
 }
 
-pub(in graph) fn triangulate<M, G>(
-    mutation: &mut M,
-    abc: FaceKey,
-) -> Result<Option<VertexKey>, Error>
+pub(in graph) struct FaceTriangulation<G>
 where
-    M: ModalMutation<G>,
     G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
 {
-    let (perimeter, centroid, face) = {
-        let face = match mutation.as_mesh().face(abc) {
-            Some(face) => face,
-            _ => return Err(GraphError::TopologyNotFound.into()),
-        };
-        let perimeter = face.interior_edges()
-            .map(|edge| (edge.vertex, edge.next_edge().vertex))
-            .collect::<Vec<_>>();
-        if perimeter.len() <= 3 {
-            return Ok(None);
-        }
-        (perimeter, face.centroid(), face.geometry.clone())
-    };
-    // This is the point of no return; the mesh has mutated. Unwrap
-    // results.
-    mutation.remove_face(abc).unwrap();
-    let c = mutation.insert_vertex(centroid);
-    for (a, b) in perimeter {
-        mutation
-            .insert_face(&[a, b, c], (Default::default(), face.clone()))
-            .unwrap();
-    }
-    Ok(Some(c))
+    vertices: Vec<VertexKey>,
+    centroid: <G as FaceCentroid>::Centroid,
+    geometry: G::Face,
+    removal: FaceRemoval<G>,
 }
 
-pub(in graph) fn join<M, G>(
-    mutation: &mut M,
-    source: FaceKey,
-    destination: FaceKey,
-) -> Result<(), Error>
+impl<G> FaceTriangulation<G>
 where
-    M: ModalMutation<G>,
-    G: Geometry,
+    G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
 {
-    let (sources, destination) = {
-        let source = match mutation.as_mesh().face(source) {
+    pub fn prepare(mesh: &Mesh<G, Consistent>, abc: FaceKey) -> Result<Self, Error> {
+        let face = match mesh.face(abc) {
             Some(face) => face,
             _ => return Err(GraphError::TopologyNotFound.into()),
         };
-        // Ensure that the opposite face exists and has the same arity.
-        let arity = source.arity();
-        let destination = match mutation.as_mesh().face(destination) {
-            Some(destination) => {
-                if destination.arity() != arity {
-                    return Err(GraphError::ArityNonConstant.into());
-                }
-                destination
-            }
-            _ => {
-                return Err(GraphError::TopologyNotFound.into());
-            }
-        };
-        // Decompose the faces into their key topologies.
-        (
-            source
+        FaceTriangulation {
+            vertices: face.vertices().map(|vertex| vertex.key()).collect(),
+            centroid: face.centroid(),
+            geometry: face.geometry.clone(),
+            removal: FaceRemoval::prepare(mesh, abc)?,
+        }
+    }
+}
+
+pub(in graph) struct FaceJoin<G>
+where
+    G: Geometry,
+{
+    sources: Vec<(EdgeKeyTopology, G::Edge)>,
+    destination: FaceKeyTopology,
+    removal: (FaceRemoval<G>, FaceRemoval<G>),
+}
+
+impl<G> FaceJoin<G>
+where
+    G: Geometry,
+{
+    pub fn prepare(
+        mesh: &Mesh<G, Consistent>,
+        source: FaceKey,
+        destination: FaceKey,
+    ) -> Result<Self, Error> {
+        let removal = (
+            FaceRemoval::prepare(mesh, source)?,
+            FaceRemoval::prepare(mesh, destination)?,
+        );
+        // Ensure that the opposite face exists and has the same arity. At this
+        // point, `FaceRemoval::prepare` has already tested for the existence
+        // of the faces, so unwrap the views.
+        let source = mesh.face(source).unwrap();
+        let destination = mesh.face(destination).unwrap();
+        if source.arity() != destination.arity() {
+            return Err(GraphError::ArityNonConstant.into());
+        }
+        FaceJoin {
+            sources: source
                 .to_key_topology()
                 .interior_edges()
                 .iter()
                 .map(|topology| {
                     (
                         topology.clone(),
-                        mutation
-                            .as_mesh()
-                            .edge(topology.key())
-                            .unwrap()
-                            .geometry
-                            .clone(),
+                        mesh.edge(topology.key()).unwrap().geometry.clone(),
                     )
                 })
                 .collect::<Vec<_>>(),
-            destination.to_key_topology(),
-        )
-    };
+            destination: destination.to_key_topology(),
+            removal,
+        }
+    }
+}
+
+pub(in graph) struct FaceExtrusion<G>
+where
+    G: FaceNormal + Geometry,
+    G::Vertex: AsPosition,
+{
+    sources: Vec<VertexKey>,
+    destinations: Vec<G::Vertex>,
+    geometry: G::Face,
+    removal: FaceRemoval<G>,
+}
+
+impl<G> FaceExtrusion<G>
+where
+    G: FaceNormal + Geometry,
+    G::Vertex: AsPosition,
+{
+    pub fn prepare<T>(mesh: &Mesh<G, Consistent>, abc: FaceKey, distance: T) -> Result<Self, Error>
+    where
+        G::Normal: Mul<T>,
+        ScaledFaceNormal<G, T>: Clone,
+        VertexPosition<G>: Add<ScaledFaceNormal<G, T>, Output = VertexPosition<G>> + Clone,
+    {
+        let removal = FaceRemoval::prepare(mesh, abc)?;
+        let face = mesh.face(abc).unwrap();
+        let translation = face.normal() * distance;
+        Ok(FaceExtrusion {
+            sources: face.vertices().map(|vertex| vertex.key()).collect(),
+            destinations: face.vertices()
+                .map(|vertex| {
+                    let mut geometry = vertex.geometry.clone();
+                    let position = geometry.as_position().clone() + translation.clone();
+                    *geometry.as_position_mut() = position;
+                    geometry
+                })
+                .collect(),
+            geometry: face.geometry.clone(),
+            removal,
+        })
+    }
+}
+
+pub(in graph) fn triangulate<M, G>(
+    mutation: &mut M,
+    triangulation: FaceTriangulation<G>,
+) -> Result<Option<VertexKey>, Error>
+where
+    M: ModalMutation<G>,
+    G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
+{
+    let FaceTriangulation {
+        vertices,
+        centroid,
+        geometry,
+        removal,
+    } = triangulation;
+    if vertices.len() <= 3 {
+        return Ok(None);
+    }
+    // This is the point of no return; the mesh has mutated. Unwrap
+    // results.
+    mutation.remove_face(removal).unwrap();
+    let c = mutation.insert_vertex(centroid);
+    for (a, b) in vertices.perimeter() {
+        mutation
+            .insert_face(
+                FaceInsertion::prepare(
+                    mutation.as_mesh(),
+                    &[a, b, c],
+                    (Default::default(), geometry.clone()),
+                ).unwrap(),
+            )
+            .unwrap();
+    }
+    Ok(Some(c))
+}
+
+pub(in graph) fn join<M, G>(mutation: &mut M, join: FaceJoin<G>) -> Result<(), Error>
+where
+    M: ModalMutation<G>,
+    G: Geometry,
+{
+    let FaceJoin {
+        sources,
+        destination,
+        removal,
+    } = join;
     // Remove the source and destination faces. Pair the topology with edge
     // geometry for the source face. At this point, we can assume that the
     // faces exist and no failures should occur; unwrap results.
-    mutation.remove_face(source)?;
-    mutation.remove_face(destination.key())?;
+    mutation.remove_face(removal.0)?;
+    mutation.remove_face(removal.1)?;
     // TODO: Is it always correct to reverse the order of the opposite
     //       face's edges?
     // Re-insert the edges of the faces and join the mutual edges.
@@ -707,42 +791,22 @@ where
     Ok(())
 }
 
-pub(in graph) fn extrude<M, G, T>(
+pub(in graph) fn extrude<M, G>(
     mutation: &mut M,
-    abc: FaceKey,
-    distance: T,
+    extrusion: FaceExtrusion<G>,
 ) -> Result<FaceKey, Error>
 where
     M: ModalMutation<G>,
     G: FaceNormal + Geometry,
-    G::Normal: Mul<T>,
     G::Vertex: AsPosition,
-    ScaledFaceNormal<G, T>: Clone,
-    VertexPosition<G>: Add<ScaledFaceNormal<G, T>, Output = VertexPosition<G>> + Clone,
 {
-    // Collect all the vertex keys of the face along with their translated
-    // geometries.
-    let (sources, destinations, face) = {
-        let face = match mutation.as_mesh().face(abc) {
-            Some(face) => face,
-            _ => return Err(GraphError::TopologyNotFound.into()),
-        };
-        let translation = face.normal() * distance;
-        let sources = face.vertices()
-            .map(|vertex| vertex.key())
-            .collect::<Vec<_>>();
-        let destinations = face.vertices()
-            .map(|vertex| {
-                let mut geometry = vertex.geometry.clone();
-                *geometry.as_position_mut() = geometry.as_position().clone() + translation.clone();
-                geometry
-            })
-            .collect::<Vec<_>>();
-        (sources, destinations, face.geometry.clone())
-    };
-    // This is the point of no return; the mesh has been mutated. Unwrap
-    // results.
-    mutation.remove_face(abc).unwrap();
+    let FaceExtrusion {
+        sources,
+        destinations,
+        geometry,
+        removal,
+    } = extrusion;
+    mutation.remove_face(removal).unwrap();
     let destinations = destinations
         .into_iter()
         .map(|vertex| mutation.insert_vertex(vertex))
@@ -750,7 +814,13 @@ where
     // Use the keys for the existing vertices and the translated geometries
     // to construct the extruded face and its connective faces.
     let extrusion = mutation
-        .insert_face(&destinations, (Default::default(), face))
+        .insert_face(
+            FaceInsertion::prepare(
+                mutation.as_mesh(),
+                &destinations,
+                (Default::default(), geometry),
+            ).unwrap(),
+        )
         .unwrap();
     for ((a, c), (b, d)) in sources
         .into_iter()
@@ -760,7 +830,10 @@ where
     {
         // TODO: Split these faces to form triangles.
         mutation
-            .insert_face(&[a, b, d, c], Default::default())
+            .insert_face(
+                FaceInsertion::prepare(mutation.as_mesh(), &[a, b, d, c], Default::default())
+                    .unwrap(),
+            )
             .unwrap();
     }
     Ok(extrusion)

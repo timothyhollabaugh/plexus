@@ -9,7 +9,7 @@ use graph::{GraphError, Perimeter};
 use graph::geometry::{EdgeLateral, EdgeMidpoint};
 use graph::geometry::alias::{ScaledEdgeLateral, VertexPosition};
 use graph::mesh::{Consistency, Consistent, Edge, Face, Inconsistent, Mesh, Vertex};
-use graph::mutation::{ImmediateMutation, ModalMutation};
+use graph::mutation::{FaceInsertion, ImmediateMutation, ModalMutation};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
 use graph::topology::{FaceView, OrphanFaceView, OrphanVertexView, OrphanView, Topological,
                       VertexView, View};
@@ -774,7 +774,11 @@ where
         )
     };
     // TODO: Split the face to form triangles.
-    mutation.insert_face(&[a, b, c, d], (edge, face)).unwrap();
+    mutation
+        .insert_face(
+            FaceInsertion::prepare(mutation.as_mesh(), &[a, b, c, d], (edge, face)).unwrap(),
+        )
+        .unwrap();
     Ok(source)
 }
 
