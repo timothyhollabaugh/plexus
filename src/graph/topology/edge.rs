@@ -308,7 +308,7 @@ where
     M: AsRef<Mesh<G, Consistent>>,
     G: EdgeMidpoint + Geometry,
 {
-    pub fn midpoint(&self) -> Result<G::Midpoint, Error> {
+    pub fn midpoint(&self) -> G::Midpoint {
         G::midpoint(self.with_mesh_ref())
     }
 }
@@ -334,7 +334,7 @@ where
     M: AsRef<Mesh<G, Consistent>>,
     G: Geometry + EdgeLateral,
 {
-    pub fn lateral(&self) -> Result<G::Lateral, Error> {
+    pub fn lateral(&self) -> G::Lateral {
         G::lateral(self.with_mesh_ref())
     }
 }
@@ -714,7 +714,7 @@ where
                 _ => return Err(GraphError::TopologyNotFound.into()),
             };
             let mut midpoint = edge.source_vertex().geometry.clone();
-            *midpoint.as_position_mut() = edge.midpoint()?;
+            *midpoint.as_position_mut() = edge.midpoint();
             (
                 edge.opposite_edge().map(|opposite| opposite.key()),
                 midpoint,
@@ -804,7 +804,7 @@ where
             edge.destination_vertex().geometry.clone(),
             edge.source_vertex().geometry.clone(),
         );
-        let translation = edge.lateral()? * distance;
+        let translation = edge.lateral() * distance;
         *vertices.0.as_position_mut() = vertices.0.as_position().clone() + translation.clone();
         *vertices.1.as_position_mut() = vertices.1.as_position().clone() + translation;
         (vertices, edge.geometry.clone())

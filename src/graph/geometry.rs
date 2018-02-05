@@ -4,7 +4,6 @@
 //! provides aliases for geometric types to improve readability of type
 //! constraints.
 
-use failure::Error;
 use std::ops::{Add, Sub};
 
 use geometry::Geometry;
@@ -17,7 +16,7 @@ use self::alias::*;
 pub trait FaceNormal: Geometry {
     type Normal;
 
-    fn normal(face: FaceRef<Self, Consistent>) -> Result<Self::Normal, Error>;
+    fn normal(face: FaceRef<Self, Consistent>) -> Self::Normal;
 }
 
 impl<G> FaceNormal for G
@@ -30,7 +29,7 @@ where
 {
     type Normal = <<VertexPosition<G> as Sub>::Output as Cross>::Output;
 
-    fn normal(face: FaceRef<Self, Consistent>) -> Result<Self::Normal, Error> {
+    fn normal(face: FaceRef<Self, Consistent>) -> Self::Normal {
         let positions = face.vertices()
             .take(3)
             .map(|vertex| vertex.geometry.as_position().clone())
@@ -38,14 +37,14 @@ where
         let (a, b, c) = (&positions[0], &positions[1], &positions[2]);
         let ab = a.clone() - b.clone();
         let bc = b.clone() - c.clone();
-        Ok(ab.cross(bc).normalize())
+        ab.cross(bc).normalize()
     }
 }
 
 pub trait FaceCentroid: Geometry {
     type Centroid;
 
-    fn centroid(face: FaceRef<Self, Consistent>) -> Result<Self::Centroid, Error>;
+    fn centroid(face: FaceRef<Self, Consistent>) -> Self::Centroid;
 }
 
 impl<G> FaceCentroid for G
@@ -55,17 +54,15 @@ where
 {
     type Centroid = G::Vertex;
 
-    fn centroid(face: FaceRef<Self, Consistent>) -> Result<Self::Centroid, Error> {
-        Ok(G::Vertex::average(
-            face.vertices().map(|vertex| vertex.geometry.clone()),
-        ))
+    fn centroid(face: FaceRef<Self, Consistent>) -> Self::Centroid {
+        G::Vertex::average(face.vertices().map(|vertex| vertex.geometry.clone()))
     }
 }
 
 pub trait EdgeMidpoint: Geometry {
     type Midpoint;
 
-    fn midpoint(edge: EdgeRef<Self, Consistent>) -> Result<Self::Midpoint, Error>;
+    fn midpoint(edge: EdgeRef<Self, Consistent>) -> Self::Midpoint;
 }
 
 impl<G> EdgeMidpoint for G
@@ -76,17 +73,17 @@ where
 {
     type Midpoint = <VertexPosition<G> as Interpolate>::Output;
 
-    fn midpoint(edge: EdgeRef<Self, Consistent>) -> Result<Self::Midpoint, Error> {
+    fn midpoint(edge: EdgeRef<Self, Consistent>) -> Self::Midpoint {
         let a = edge.source_vertex().geometry.as_position().clone();
         let b = edge.destination_vertex().geometry.as_position().clone();
-        Ok(a.midpoint(b))
+        a.midpoint(b)
     }
 }
 
 pub trait EdgeLateral: Geometry {
     type Lateral;
 
-    fn lateral(edge: EdgeRef<Self, Consistent>) -> Result<Self::Lateral, Error>;
+    fn lateral(edge: EdgeRef<Self, Consistent>) -> Self::Lateral;
 }
 
 impl<G> EdgeLateral for G
@@ -100,7 +97,7 @@ where
 {
     type Lateral = <VertexPosition<G> as Sub>::Output;
 
-    fn lateral(edge: EdgeRef<Self, Consistent>) -> Result<Self::Lateral, Error> {
+    fn lateral(edge: EdgeRef<Self, Consistent>) -> Self::Lateral {
         let a = edge.source_vertex().geometry.as_position().clone();
         let b = edge.destination_vertex().geometry.as_position().clone();
         let c = edge.opposite_edge()
@@ -112,7 +109,7 @@ where
         let ab = a - b.clone();
         let cb = c.clone() - b.clone();
         let p = b + ab.project(cb);
-        Ok((p - c).normalize())
+        (p - c).normalize()
     }
 }
 

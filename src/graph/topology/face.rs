@@ -155,7 +155,7 @@ where
     M: AsRef<Mesh<G, Consistent>>,
     G: FaceCentroid + Geometry,
 {
-    pub fn centroid(&self) -> Result<G::Centroid, Error> {
+    pub fn centroid(&self) -> G::Centroid {
         G::centroid(self.with_mesh_ref())
     }
 }
@@ -181,7 +181,7 @@ where
     M: AsRef<Mesh<G, Consistent>>,
     G: FaceNormal + Geometry,
 {
-    pub fn normal(&self) -> Result<G::Normal, Error> {
+    pub fn normal(&self) -> G::Normal {
         G::normal(self.with_mesh_ref())
     }
 }
@@ -623,7 +623,7 @@ where
         if perimeter.len() <= 3 {
             return Ok(None);
         }
-        (perimeter, face.centroid()?, face.geometry.clone())
+        (perimeter, face.centroid(), face.geometry.clone())
     };
     // This is the point of no return; the mesh has mutated. Unwrap
     // results.
@@ -727,7 +727,7 @@ where
             Some(face) => face,
             _ => return Err(GraphError::TopologyNotFound.into()),
         };
-        let translation = face.normal()? * distance;
+        let translation = face.normal() * distance;
         let sources = face.vertices()
             .map(|vertex| vertex.key())
             .collect::<Vec<_>>();
