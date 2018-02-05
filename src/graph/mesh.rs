@@ -17,7 +17,7 @@ use graph::{GraphError, Perimeter};
 use graph::geometry::FaceCentroid;
 use graph::mutation::{BatchMutation, ModalMutation};
 use graph::storage::{EdgeKey, FaceKey, Storage, StorageIter, StorageIterMut, VertexKey};
-use graph::topology::{EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut,
+use graph::topology::{face, EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut,
                       OrphanVertexMut, OrphanView, Topological, VertexMut, VertexRef, View};
 
 pub trait Consistency {}
@@ -563,15 +563,12 @@ where
     where
         G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
     {
-        let faces = self.faces
-            .keys()
-            .map(|key| FaceKey::from(*key))
-            .collect::<Vec<_>>();
-        for face in faces {
-            let face = FaceMut::new(self, face);
-            face.triangulate()?;
+        let keys = self.faces.keys().cloned().collect::<Vec<_>>();
+        let mut mutation = BatchMutation::replace(self, Mesh::empty());
+        for key in keys {
+            let _ = face::triangulate(&mut *mutation, key.into());
         }
-        Ok(())
+        mutation.commit().map(|_| ())
     }
 
     /// Creates a mesh buffer from the mesh.

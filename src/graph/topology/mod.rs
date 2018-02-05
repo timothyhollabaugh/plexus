@@ -16,9 +16,9 @@ use geometry::{Attribute, Geometry};
 use graph::mesh::{Consistency, Consistent, Mesh};
 use graph::storage::OpaqueKey;
 
-mod edge;
-mod face;
-mod vertex;
+pub mod edge;
+pub mod face;
+pub mod vertex;
 
 pub use self::edge::{EdgeKeyTopology, EdgeView, OrphanEdgeView};
 pub use self::face::{FaceKeyTopology, FaceView, OrphanFaceView};
