@@ -297,8 +297,9 @@ where
         let EdgeView {
             mesh, key: source, ..
         } = self;
+        let joining = EdgeJoining::prepare(mesh, source, destination)?;
         let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
-        let edge = join(&mut *mutation, source, destination)?;
+        let edge = join(&mut *mutation, joining)?;
         Ok(EdgeView::new(mutation.commit().unwrap(), edge))
     }
 }
@@ -323,8 +324,9 @@ where
         G: EdgeMidpoint<Midpoint = VertexPosition<G>>,
     {
         let EdgeView { mesh, key: ab, .. } = self;
+        let splitting = EdgeSplitting::prepare(mesh, ab)?;
         let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
-        let vertex = split(&mut *mutation, ab)?;
+        let vertex = split(&mut *mutation, splitting)?;
         Ok(VertexView::new(mutation.commit().unwrap(), vertex))
     }
 }
@@ -354,8 +356,9 @@ where
         VertexPosition<G>: Add<ScaledEdgeLateral<G, T>, Output = VertexPosition<G>> + Clone,
     {
         let EdgeView { mesh, key: ab, .. } = self;
+        let extrusion = EdgeExtrusion::prepare(mesh, ab, distance)?;
         let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
-        let edge = extrude(&mut *mutation, ab, distance)?;
+        let edge = extrude(&mut *mutation, extrusion)?;
         Ok(EdgeView::new(mutation.commit().unwrap(), edge))
     }
 }
@@ -658,7 +661,145 @@ impl EdgeKeyTopology {
     }
 }
 
-pub(in graph) fn split<M, G>(mutation: &mut M, ab: EdgeKey) -> Result<VertexKey, Error>
+pub(in graph) struct EdgeSplitting<G>
+where
+    G: Geometry,
+{
+    ab: EdgeKey,
+    ba: EdgeKey,
+    midpoint: G::Vertex,
+}
+
+impl<G> EdgeSplitting<G>
+where
+    G: EdgeMidpoint<Midpoint = VertexPosition<G>> + Geometry,
+    G::Vertex: AsPosition,
+{
+    pub fn prepare<C>(mesh: &Mesh<G, C>, ab: EdgeKey) -> Result<Self, Error>
+    where
+        C: Consistency,
+    {
+        let (a, b) = ab.to_vertex_keys();
+        let edge = match mesh.edge(ab) {
+            Some(edge) => edge,
+            _ => return Err(GraphError::TopologyNotFound.into()),
+        };
+        let mut midpoint = edge.source_vertex().geometry.clone();
+        *midpoint.as_position_mut() = edge.midpoint();
+        Ok(EdgeSplitting {
+            ab,
+            ba: (b, a).into(),
+            midpoint,
+        })
+    }
+}
+
+pub(in graph) struct EdgeJoining<G>
+where
+    G: Geometry,
+{
+    source: EdgeKey,
+    destination: EdgeKey,
+    edge: G::Edge,
+    face: G::Face,
+}
+
+impl<G> EdgeJoining<G>
+where
+    G: Geometry,
+{
+    pub fn prepare<C>(
+        mesh: &Mesh<G, C>,
+        source: EdgeKey,
+        destination: EdgeKey,
+    ) -> Result<Self, Error>
+    where
+        C: Consistency,
+    {
+        match (mesh.edge(source), mesh.edge(destination)) {
+            (Some(_), Some(_)) => {}
+            _ => return Err(GraphError::TopologyNotFound.into()),
+        }
+        let (a, b) = source.to_vertex_keys();
+        let (c, d) = destination.to_vertex_keys();
+        // At this point, we can assume the points a, b, c, and d exist in the
+        // mesh. Before mutating the mesh, ensure that existing interior edges
+        // are boundaries.
+        for edge in [a, b, c, d].perimeter().flat_map(|ab| mesh.edge(ab.into())) {
+            if !edge.is_boundary_edge() {
+                return Err(GraphError::TopologyConflict.into());
+            }
+        }
+        // Insert a quad joining the edges. These operations should not fail;
+        // unwrap their results.
+        let (edge, face) = {
+            let source = mesh.edge(source).unwrap();
+            (
+                source.geometry.clone(),
+                source
+                    .opposite_edge()
+                    .unwrap()
+                    .face()
+                    .map(|face| face.geometry.clone())
+                    .unwrap_or_else(Default::default),
+            )
+        };
+        Ok(EdgeJoining {
+            source,
+            destination,
+            edge,
+            face,
+        })
+    }
+}
+
+pub(in graph) struct EdgeExtrusion<G>
+where
+    G: Geometry,
+{
+    ab: EdgeKey,
+    vertices: (G::Vertex, G::Vertex),
+    edge: G::Edge,
+}
+
+impl<G> EdgeExtrusion<G>
+where
+    G: Geometry,
+{
+    pub fn prepare<T>(mesh: &Mesh<G, Consistent>, ab: EdgeKey, distance: T) -> Result<Self, Error>
+    where
+        G: Geometry + EdgeLateral,
+        G::Lateral: Mul<T>,
+        G::Vertex: AsPosition,
+        ScaledEdgeLateral<G, T>: Clone,
+        VertexPosition<G>: Add<ScaledEdgeLateral<G, T>, Output = VertexPosition<G>> + Clone,
+    {
+        // Get the extruded geometry.
+        let (vertices, edge) = {
+            let edge = match mesh.edge(ab) {
+                Some(edge) => edge,
+                _ => return Err(GraphError::TopologyNotFound.into()),
+            };
+            if !edge.is_boundary_edge() {
+                return Err(GraphError::TopologyConflict.into());
+            }
+            let mut vertices = (
+                edge.destination_vertex().geometry.clone(),
+                edge.source_vertex().geometry.clone(),
+            );
+            let translation = edge.lateral() * distance;
+            *vertices.0.as_position_mut() = vertices.0.as_position().clone() + translation.clone();
+            *vertices.1.as_position_mut() = vertices.1.as_position().clone() + translation;
+            (vertices, edge.geometry.clone())
+        };
+        Ok(EdgeExtrusion { ab, vertices, edge })
+    }
+}
+
+pub(in graph) fn split<M, G>(
+    mutation: &mut M,
+    splitting: EdgeSplitting<G>,
+) -> Result<VertexKey, Error>
 where
     M: ModalMutation<G>,
     G: EdgeMidpoint<Midpoint = VertexPosition<G>> + Geometry,
@@ -706,73 +847,27 @@ where
         Ok((am, mb))
     }
 
-    let (ba, m) = {
-        // Insert a new vertex at the midpoint.
-        let (ba, midpoint) = {
-            let edge = match mutation.as_mesh().edge(ab) {
-                Some(edge) => edge,
-                _ => return Err(GraphError::TopologyNotFound.into()),
-            };
-            let mut midpoint = edge.source_vertex().geometry.clone();
-            *midpoint.as_position_mut() = edge.midpoint();
-            (
-                edge.opposite_edge().map(|opposite| opposite.key()),
-                midpoint,
-            )
-        };
-        (ba, mutation.insert_vertex(midpoint))
-    };
+    let EdgeSplitting { ab, ba, midpoint } = splitting;
+    let m = mutation.insert_vertex(midpoint);
     // Split the half-edges. This should not fail; unwrap the results.
     split_at_vertex(mutation, ab, m).unwrap();
-    if let Some(ba) = ba {
-        split_at_vertex(mutation, ba, m).unwrap();
-    }
+    split_at_vertex(mutation, ba, m).unwrap();
     Ok(m)
 }
 
-pub(in graph) fn join<M, G>(
-    mutation: &mut M,
-    source: EdgeKey,
-    destination: EdgeKey,
-) -> Result<EdgeKey, Error>
+pub(in graph) fn join<M, G>(mutation: &mut M, joining: EdgeJoining<G>) -> Result<EdgeKey, Error>
 where
     M: ModalMutation<G>,
     G: Geometry,
 {
-    match (
-        mutation.as_mesh().edge(source),
-        mutation.as_mesh().edge(destination),
-    ) {
-        (Some(_), Some(_)) => {}
-        _ => return Err(GraphError::TopologyNotFound.into()),
-    }
+    let EdgeJoining {
+        source,
+        destination,
+        edge,
+        face,
+    } = joining;
     let (a, b) = source.to_vertex_keys();
     let (c, d) = destination.to_vertex_keys();
-    // At this point, we can assume the points a, b, c, and d exist in the
-    // mesh. Before mutating the mesh, ensure that existing interior edges
-    // are boundaries.
-    for edge in [a, b, c, d]
-        .perimeter()
-        .flat_map(|ab| mutation.as_mesh().edge(ab.into()))
-    {
-        if !edge.is_boundary_edge() {
-            return Err(GraphError::TopologyConflict.into());
-        }
-    }
-    // Insert a quad joining the edges. These operations should not fail;
-    // unwrap their results.
-    let (edge, face) = {
-        let source = mutation.as_mesh().edge(source).unwrap();
-        (
-            source.geometry.clone(),
-            source
-                .opposite_edge()
-                .unwrap()
-                .face()
-                .map(|face| face.geometry.clone())
-                .unwrap_or_else(Default::default),
-        )
-    };
     // TODO: Split the face to form triangles.
     mutation
         .insert_face(
@@ -784,8 +879,7 @@ where
 
 pub(in graph) fn extrude<M, G, T>(
     mutation: &mut M,
-    ab: EdgeKey,
-    distance: T,
+    extrusion: EdgeExtrusion<G>,
 ) -> Result<EdgeKey, Error>
 where
     M: ModalMutation<G>,
@@ -795,28 +889,14 @@ where
     ScaledEdgeLateral<G, T>: Clone,
     VertexPosition<G>: Add<ScaledEdgeLateral<G, T>, Output = VertexPosition<G>> + Clone,
 {
-    // Get the extruded geometry.
-    let (vertices, edge) = {
-        let edge = match mutation.as_mesh().edge(ab) {
-            Some(edge) => edge,
-            _ => return Err(GraphError::TopologyNotFound.into()),
-        };
-        if !edge.is_boundary_edge() {
-            return Err(GraphError::TopologyConflict.into());
-        }
-        let mut vertices = (
-            edge.destination_vertex().geometry.clone(),
-            edge.source_vertex().geometry.clone(),
-        );
-        let translation = edge.lateral() * distance;
-        *vertices.0.as_position_mut() = vertices.0.as_position().clone() + translation.clone();
-        *vertices.1.as_position_mut() = vertices.1.as_position().clone() + translation;
-        (vertices, edge.geometry.clone())
-    };
+    let EdgeExtrusion { ab, vertices, edge } = extrusion;
     let c = mutation.insert_vertex(vertices.0);
     let d = mutation.insert_vertex(vertices.1);
     let cd = mutation.insert_edge((c, d), edge).unwrap();
-    Ok(join(mutation, ab, cd).unwrap())
+    Ok(join(
+        mutation,
+        EdgeJoining::prepare(mutation.as_mesh(), ab, cd).unwrap(),
+    ).unwrap())
 }
 
 #[cfg(test)]

@@ -77,6 +77,7 @@ where
 {
     abc: FaceKey,
     mutuals: Vec<VertexKey>,
+    edges: Vec<EdgeKey>,
     boundaries: Vec<EdgeKey>,
     phantom: PhantomData<G>,
 }
@@ -86,25 +87,20 @@ where
     G: Geometry,
 {
     pub fn prepare<C>(mesh: &Mesh<G, Consistent>, abc: FaceKey) -> Result<Self, Error> {
-        let (mutuals, boundaries) = {
-            let face = match mesh.face(abc) {
-                Some(face) => face,
-                _ => return Err(GraphError::TopologyNotFound.into()),
-            };
-            (
-                face.mutuals().into_iter().collect(),
-                // Find any boundary edges. Once this face is removed, such edges
-                // will have no face on either side.
-                face.interior_edges()
-                    .flat_map(|edge| edge.into_boundary_edge())
-                    .map(|edge| edge.key())
-                    .collect(),
-            )
+        let face = match mesh.face(abc) {
+            Some(face) => face,
+            _ => return Err(GraphError::TopologyNotFound.into()),
         };
         Ok(FaceRemoval {
             abc,
-            mutuals,
-            boundaries,
+            mutuals: face.mutuals().into_iter().collect(),
+            edges: face.interior_edges().map(|edge| edge.key()).collect(),
+            // Find any boundary edges. Once this face is removed, such edges
+            // will have no face on either side.
+            boundaries: face.interior_edges()
+                .flat_map(|edge| edge.into_boundary_edge())
+                .map(|edge| edge.key())
+                .collect(),
             phantom: PhantomData,
         })
     }
@@ -422,6 +418,7 @@ where
         let FaceRemoval {
             abc,
             mutuals,
+            edges,
             boundaries,
             ..
         } = removal;
@@ -457,7 +454,7 @@ where
                 return Err(GraphError::TopologyConflict.into());
             }
         }
-        self.disconnect_face_interior(abc).unwrap();
+        self.disconnect_face_interior(&edges).unwrap();
         for ab in boundaries {
             self.remove_composite_edge(ab).unwrap();
         }
@@ -604,10 +601,11 @@ where
         let FaceRemoval {
             abc,
             mutuals,
+            edges,
             boundaries,
             ..
         } = removal;
-        self.disconnect_face_interior(abc).unwrap();
+        self.disconnect_face_interior(&edges).unwrap();
         for ab in boundaries {
             self.remove_composite_edge(ab).unwrap();
         }

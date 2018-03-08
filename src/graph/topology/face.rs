@@ -11,8 +11,9 @@ use graph::geometry::alias::{ScaledFaceNormal, VertexPosition};
 use graph::mesh::{Consistency, Consistent, Edge, Face, Mesh, Vertex};
 use graph::mutation::{BatchMutation, FaceInsertion, FaceRemoval, ImmediateMutation, ModalMutation};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
-use graph::topology::{edge, EdgeKeyTopology, EdgeView, OrphanEdgeView, OrphanVertexView,
-                      OrphanView, Topological, VertexView, View};
+use graph::topology::{EdgeKeyTopology, EdgeView, OrphanEdgeView, OrphanVertexView, OrphanView,
+                      Topological, VertexView, View};
+use graph::topology::edge::{self, EdgeJoining};
 
 /// Do **not** use this type directly. Use `FaceRef` and `FaceMut` instead.
 ///
@@ -143,9 +144,9 @@ where
         let FaceView {
             mesh, key: source, ..
         } = self;
-        let join = FaceJoin::prepare(&*mesh, source, destination)?;
+        let joining = FaceJoining::prepare(mesh, source, destination)?;
         let mut mutation = BatchMutation::replace(mesh, Mesh::empty());
-        join(&mut *mutation, join)?;
+        join(&mut *mutation, joining)?;
         mutation.commit()?;
         Ok(())
     }
@@ -169,7 +170,7 @@ where
         self,
     ) -> Result<Option<VertexView<&'a mut Mesh<G, Consistent>, G, Consistent>>, Error> {
         let FaceView { mesh, key: abc, .. } = self;
-        let triangulation = FaceTriangulation::prepare(&*mesh, abc)?;
+        let triangulation = FaceTriangulation::prepare(mesh, abc)?;
         let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
         Ok(match triangulate(&mut *mutation, triangulation)? {
             Some(vertex) => Some(VertexView::new(mutation.commit().unwrap(), vertex)),
@@ -203,7 +204,7 @@ where
         VertexPosition<G>: Add<ScaledFaceNormal<G, T>, Output = VertexPosition<G>> + Clone,
     {
         let FaceView { mesh, key: abc, .. } = self;
-        let extrusion = FaceExtrusion::prepare(&*mesh, abc, distance)?;
+        let extrusion = FaceExtrusion::prepare(mesh, abc, distance)?;
         let mut mutation = BatchMutation::replace(mesh, Mesh::empty());
         let face = extrude(&mut *mutation, extrusion)?;
         Ok(FaceView::new(mutation.commit().unwrap(), face))
@@ -626,16 +627,16 @@ where
             Some(face) => face,
             _ => return Err(GraphError::TopologyNotFound.into()),
         };
-        FaceTriangulation {
+        Ok(FaceTriangulation {
             vertices: face.vertices().map(|vertex| vertex.key()).collect(),
             centroid: face.centroid(),
             geometry: face.geometry.clone(),
             removal: FaceRemoval::prepare(mesh, abc)?,
-        }
+        })
     }
 }
 
-pub(in graph) struct FaceJoin<G>
+pub(in graph) struct FaceJoining<G>
 where
     G: Geometry,
 {
@@ -644,7 +645,7 @@ where
     removal: (FaceRemoval<G>, FaceRemoval<G>),
 }
 
-impl<G> FaceJoin<G>
+impl<G> FaceJoining<G>
 where
     G: Geometry,
 {
@@ -665,7 +666,7 @@ where
         if source.arity() != destination.arity() {
             return Err(GraphError::ArityNonConstant.into());
         }
-        FaceJoin {
+        Ok(FaceJoining {
             sources: source
                 .to_key_topology()
                 .interior_edges()
@@ -679,7 +680,7 @@ where
                 .collect::<Vec<_>>(),
             destination: destination.to_key_topology(),
             removal,
-        }
+        })
     }
 }
 
@@ -759,16 +760,16 @@ where
     Ok(Some(c))
 }
 
-pub(in graph) fn join<M, G>(mutation: &mut M, join: FaceJoin<G>) -> Result<(), Error>
+pub(in graph) fn join<M, G>(mutation: &mut M, joining: FaceJoining<G>) -> Result<(), Error>
 where
     M: ModalMutation<G>,
     G: Geometry,
 {
-    let FaceJoin {
+    let FaceJoining {
         sources,
         destination,
         removal,
-    } = join;
+    } = joining;
     // Remove the source and destination faces. Pair the topology with edge
     // geometry for the source face. At this point, we can assume that the
     // faces exist and no failures should occur; unwrap results.
@@ -785,7 +786,10 @@ where
         let (c, d) = destination.vertices();
         let ab = mutation.insert_edge((a, b), source.1.clone()).unwrap();
         let cd = mutation.insert_edge((c, d), source.1).unwrap();
-        edge::join(mutation, ab, cd).unwrap();
+        edge::join(
+            mutation,
+            EdgeJoining::prepare(mutation.as_mesh(), ab, cd).unwrap(),
+        ).unwrap();
     }
     // TODO: Is there any reasonable topology this can return?
     Ok(())
