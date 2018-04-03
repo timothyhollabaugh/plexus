@@ -137,6 +137,8 @@ mod mutation;
 mod storage;
 mod topology;
 
+use failure::Error;
+
 use self::mesh::Consistent;
 
 pub use self::storage::{EdgeKey, FaceKey, VertexKey};
@@ -171,6 +173,40 @@ pub enum GraphError {
         actual: usize,
     },
     #[fail(display = "face arity is non-constant")] ArityNonConstant,
+}
+
+// TODO: Using `Error` so broadly is a misuse case. Look at how complex
+//       `ResultExt` is! Just use `GraphError` directly. Never use `Error` along
+//       "happy" or "expected" paths (this happens often in the `mutation`
+//       module.
+
+pub trait ResultExt<T>: Sized {
+    fn map_conflict_to_ok(self) -> Result<Option<T>, Error>;
+
+    fn or_if_conflict<F>(self, f: F) -> Result<T, Error>
+    where
+        F: FnOnce() -> Result<T, Error>;
+}
+
+impl<T> ResultExt<T> for Result<T, Error> {
+    fn map_conflict_to_ok(self) -> Result<Option<T>, Error> {
+        self.map(|value| Some(value)).or_else(|error| {
+            match error.downcast::<GraphError>().unwrap() {
+                GraphError::TopologyConflict => Ok(None),
+                error => Err(error.into()),
+            }
+        })
+    }
+
+    fn or_if_conflict<F>(self, f: F) -> Result<T, Error>
+    where
+        F: FnOnce() -> Result<T, Error>,
+    {
+        self.or_else(|error| match error.downcast::<GraphError>().unwrap() {
+            GraphError::TopologyConflict => f(),
+            error => Err(error.into()),
+        })
+    }
 }
 
 /// Provides an iterator over a window of duplets that includes the first value

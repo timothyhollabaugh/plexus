@@ -9,11 +9,11 @@ use graph::{GraphError, Perimeter};
 use graph::geometry::{FaceCentroid, FaceNormal};
 use graph::geometry::alias::{ScaledFaceNormal, VertexPosition};
 use graph::mesh::{Consistency, Consistent, Edge, Face, Mesh, Vertex};
-use graph::mutation::{BatchMutation, FaceInsertion, FaceRemoval, ImmediateMutation, ModalMutation};
+use graph::mutation::{Commit, FaceRemoveCache, Mutation};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
 use graph::topology::{EdgeKeyTopology, EdgeView, OrphanEdgeView, OrphanVertexView, OrphanView,
                       Topological, VertexView, View};
-use graph::topology::edge::{self, EdgeJoining};
+use graph::topology::edge::{self, EdgeJoinCache};
 
 /// Do **not** use this type directly. Use `FaceRef` and `FaceMut` instead.
 ///
@@ -144,9 +144,9 @@ where
         let FaceView {
             mesh, key: source, ..
         } = self;
-        let joining = FaceJoining::prepare(mesh, source, destination)?;
-        let mut mutation = BatchMutation::replace(mesh, Mesh::empty());
-        join(&mut *mutation, joining)?;
+        let cache = FaceJoinCache::snapshot(mesh, source, destination)?;
+        let mut mutation = Mutation::replace(mesh, Mesh::empty());
+        join_with_cache(&mut *mutation, cache)?;
         mutation.commit()?;
         Ok(())
     }
@@ -170,9 +170,9 @@ where
         self,
     ) -> Result<Option<VertexView<&'a mut Mesh<G, Consistent>, G, Consistent>>, Error> {
         let FaceView { mesh, key: abc, .. } = self;
-        let triangulation = FaceTriangulation::prepare(mesh, abc)?;
-        let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
-        Ok(match triangulate(&mut *mutation, triangulation)? {
+        let cache = FaceTriangulateCache::snapshot(mesh, abc)?;
+        let mut mutation = Mutation::replace(mesh, Mesh::empty());
+        Ok(match triangulate_with_cache(&mut *mutation, cache)? {
             Some(vertex) => Some(VertexView::new(mutation.commit().unwrap(), vertex)),
             _ => None,
         })
@@ -204,9 +204,9 @@ where
         VertexPosition<G>: Add<ScaledFaceNormal<G, T>, Output = VertexPosition<G>> + Clone,
     {
         let FaceView { mesh, key: abc, .. } = self;
-        let extrusion = FaceExtrusion::prepare(mesh, abc, distance)?;
-        let mut mutation = BatchMutation::replace(mesh, Mesh::empty());
-        let face = extrude(&mut *mutation, extrusion)?;
+        let cache = FaceExtrudeCache::snapshot(mesh, abc, distance)?;
+        let mut mutation = Mutation::replace(mesh, Mesh::empty());
+        let face = extrude_with_cache(&mut *mutation, cache)?;
         Ok(FaceView::new(mutation.commit().unwrap(), face))
     }
 }
@@ -608,65 +608,68 @@ where
     }
 }
 
-pub(in graph) struct FaceTriangulation<G>
+pub(in graph) struct FaceTriangulateCache<G>
 where
     G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
 {
     vertices: Vec<VertexKey>,
     centroid: <G as FaceCentroid>::Centroid,
     geometry: G::Face,
-    removal: FaceRemoval<G>,
+    cache: FaceRemoveCache<G, Consistent>,
 }
 
-impl<G> FaceTriangulation<G>
+impl<G> FaceTriangulateCache<G>
 where
     G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
 {
-    pub fn prepare(mesh: &Mesh<G, Consistent>, abc: FaceKey) -> Result<Self, Error> {
+    pub fn snapshot(mesh: &Mesh<G, Consistent>, abc: FaceKey) -> Result<Self, Error> {
         let face = match mesh.face(abc) {
             Some(face) => face,
             _ => return Err(GraphError::TopologyNotFound.into()),
         };
-        Ok(FaceTriangulation {
+        Ok(FaceTriangulateCache {
             vertices: face.vertices().map(|vertex| vertex.key()).collect(),
             centroid: face.centroid(),
             geometry: face.geometry.clone(),
-            removal: FaceRemoval::prepare(mesh, abc)?,
+            cache: FaceRemoveCache::snapshot(mesh, abc)?,
         })
     }
 }
 
-pub(in graph) struct FaceJoining<G>
+pub(in graph) struct FaceJoinCache<G>
 where
     G: Geometry,
 {
     sources: Vec<(EdgeKeyTopology, G::Edge)>,
     destination: FaceKeyTopology,
-    removal: (FaceRemoval<G>, FaceRemoval<G>),
+    cache: (
+        FaceRemoveCache<G, Consistent>,
+        FaceRemoveCache<G, Consistent>,
+    ),
 }
 
-impl<G> FaceJoining<G>
+impl<G> FaceJoinCache<G>
 where
     G: Geometry,
 {
-    pub fn prepare(
+    pub fn snapshot(
         mesh: &Mesh<G, Consistent>,
         source: FaceKey,
         destination: FaceKey,
     ) -> Result<Self, Error> {
-        let removal = (
-            FaceRemoval::prepare(mesh, source)?,
-            FaceRemoval::prepare(mesh, destination)?,
+        let cache = (
+            FaceRemoveCache::snapshot(mesh, source)?,
+            FaceRemoveCache::snapshot(mesh, destination)?,
         );
         // Ensure that the opposite face exists and has the same arity. At this
-        // point, `FaceRemoval::prepare` has already tested for the existence
+        // point, `FaceRemoveCache::snapshot` has already tested for the existence
         // of the faces, so unwrap the views.
         let source = mesh.face(source).unwrap();
         let destination = mesh.face(destination).unwrap();
         if source.arity() != destination.arity() {
             return Err(GraphError::ArityNonConstant.into());
         }
-        Ok(FaceJoining {
+        Ok(FaceJoinCache {
             sources: source
                 .to_key_topology()
                 .interior_edges()
@@ -679,12 +682,12 @@ where
                 })
                 .collect::<Vec<_>>(),
             destination: destination.to_key_topology(),
-            removal,
+            cache,
         })
     }
 }
 
-pub(in graph) struct FaceExtrusion<G>
+pub(in graph) struct FaceExtrudeCache<G>
 where
     G: FaceNormal + Geometry,
     G::Vertex: AsPosition,
@@ -692,24 +695,24 @@ where
     sources: Vec<VertexKey>,
     destinations: Vec<G::Vertex>,
     geometry: G::Face,
-    removal: FaceRemoval<G>,
+    cache: FaceRemoveCache<G, Consistent>,
 }
 
-impl<G> FaceExtrusion<G>
+impl<G> FaceExtrudeCache<G>
 where
     G: FaceNormal + Geometry,
     G::Vertex: AsPosition,
 {
-    pub fn prepare<T>(mesh: &Mesh<G, Consistent>, abc: FaceKey, distance: T) -> Result<Self, Error>
+    pub fn snapshot<T>(mesh: &Mesh<G, Consistent>, abc: FaceKey, distance: T) -> Result<Self, Error>
     where
         G::Normal: Mul<T>,
         ScaledFaceNormal<G, T>: Clone,
         VertexPosition<G>: Add<ScaledFaceNormal<G, T>, Output = VertexPosition<G>> + Clone,
     {
-        let removal = FaceRemoval::prepare(mesh, abc)?;
+        let cache = FaceRemoveCache::snapshot(mesh, abc)?;
         let face = mesh.face(abc).unwrap();
         let translation = face.normal() * distance;
-        Ok(FaceExtrusion {
+        Ok(FaceExtrudeCache {
             sources: face.vertices().map(|vertex| vertex.key()).collect(),
             destinations: face.vertices()
                 .map(|vertex| {
@@ -720,61 +723,51 @@ where
                 })
                 .collect(),
             geometry: face.geometry.clone(),
-            removal,
+            cache,
         })
     }
 }
 
-pub(in graph) fn triangulate<M, G>(
-    mutation: &mut M,
-    triangulation: FaceTriangulation<G>,
+pub(in graph) fn triangulate_with_cache<G>(
+    mutation: &mut Mutation<G>,
+    cache: FaceTriangulateCache<G>,
 ) -> Result<Option<VertexKey>, Error>
 where
-    M: ModalMutation<G>,
     G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
 {
-    let FaceTriangulation {
+    let FaceTriangulateCache {
         vertices,
         centroid,
         geometry,
-        removal,
-    } = triangulation;
+        cache,
+    } = cache;
     if vertices.len() <= 3 {
         return Ok(None);
     }
-    // This is the point of no return; the mesh has mutated. Unwrap
-    // results.
-    mutation.remove_face(removal).unwrap();
+    mutation.remove_face_with_cache(cache)?;
     let c = mutation.insert_vertex(centroid);
     for (a, b) in vertices.perimeter() {
-        mutation
-            .insert_face(
-                FaceInsertion::prepare(
-                    mutation.as_mesh(),
-                    &[a, b, c],
-                    (Default::default(), geometry.clone()),
-                ).unwrap(),
-            )
-            .unwrap();
+        mutation.insert_face(&[a, b, c], (Default::default(), geometry.clone()))?;
     }
     Ok(Some(c))
 }
 
-pub(in graph) fn join<M, G>(mutation: &mut M, joining: FaceJoining<G>) -> Result<(), Error>
+pub(in graph) fn join_with_cache<G>(
+    mutation: &mut Mutation<G>,
+    cache: FaceJoinCache<G>,
+) -> Result<(), Error>
 where
-    M: ModalMutation<G>,
     G: Geometry,
 {
-    let FaceJoining {
+    let FaceJoinCache {
         sources,
         destination,
-        removal,
-    } = joining;
+        cache,
+    } = cache;
     // Remove the source and destination faces. Pair the topology with edge
-    // geometry for the source face. At this point, we can assume that the
-    // faces exist and no failures should occur; unwrap results.
-    mutation.remove_face(removal.0)?;
-    mutation.remove_face(removal.1)?;
+    // geometry for the source face.
+    mutation.remove_face_with_cache(cache.0)?;
+    mutation.remove_face_with_cache(cache.1)?;
     // TODO: Is it always correct to reverse the order of the opposite
     //       face's edges?
     // Re-insert the edges of the faces and join the mutual edges.
@@ -784,48 +777,39 @@ where
     {
         let (a, b) = source.0.vertices();
         let (c, d) = destination.vertices();
-        let ab = mutation.insert_edge((a, b), source.1.clone()).unwrap();
-        let cd = mutation.insert_edge((c, d), source.1).unwrap();
-        edge::join(
+        let ab = mutation.insert_edge((a, b), source.1.clone())?;
+        let cd = mutation.insert_edge((c, d), source.1)?;
+        edge::join_with_cache(
             mutation,
-            EdgeJoining::prepare(mutation.as_mesh(), ab, cd).unwrap(),
-        ).unwrap();
+            EdgeJoinCache::snapshot(mutation.mutant(), ab, cd)?,
+        )?;
     }
     // TODO: Is there any reasonable topology this can return?
     Ok(())
 }
 
-pub(in graph) fn extrude<M, G>(
-    mutation: &mut M,
-    extrusion: FaceExtrusion<G>,
+pub(in graph) fn extrude_with_cache<G>(
+    mutation: &mut Mutation<G>,
+    cache: FaceExtrudeCache<G>,
 ) -> Result<FaceKey, Error>
 where
-    M: ModalMutation<G>,
     G: FaceNormal + Geometry,
     G::Vertex: AsPosition,
 {
-    let FaceExtrusion {
+    let FaceExtrudeCache {
         sources,
         destinations,
         geometry,
-        removal,
-    } = extrusion;
-    mutation.remove_face(removal).unwrap();
+        cache,
+    } = cache;
+    mutation.remove_face_with_cache(cache)?;
     let destinations = destinations
         .into_iter()
         .map(|vertex| mutation.insert_vertex(vertex))
         .collect::<Vec<_>>();
     // Use the keys for the existing vertices and the translated geometries
     // to construct the extruded face and its connective faces.
-    let extrusion = mutation
-        .insert_face(
-            FaceInsertion::prepare(
-                mutation.as_mesh(),
-                &destinations,
-                (Default::default(), geometry),
-            ).unwrap(),
-        )
-        .unwrap();
+    let extrusion = mutation.insert_face(&destinations, (Default::default(), geometry))?;
     for ((a, c), (b, d)) in sources
         .into_iter()
         .zip(destinations.into_iter())
@@ -833,12 +817,7 @@ where
         .perimeter()
     {
         // TODO: Split these faces to form triangles.
-        mutation
-            .insert_face(
-                FaceInsertion::prepare(mutation.as_mesh(), &[a, b, d, c], Default::default())
-                    .unwrap(),
-            )
-            .unwrap();
+        mutation.insert_face(&[a, b, d, c], Default::default())?;
     }
     Ok(extrusion)
 }

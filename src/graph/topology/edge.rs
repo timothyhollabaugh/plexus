@@ -9,7 +9,7 @@ use graph::{GraphError, Perimeter};
 use graph::geometry::{EdgeLateral, EdgeMidpoint};
 use graph::geometry::alias::{ScaledEdgeLateral, VertexPosition};
 use graph::mesh::{Consistency, Consistent, Edge, Face, Inconsistent, Mesh, Vertex};
-use graph::mutation::{FaceInsertion, ImmediateMutation, ModalMutation};
+use graph::mutation::{Commit, Mutation};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
 use graph::topology::{FaceView, OrphanFaceView, OrphanVertexView, OrphanView, Topological,
                       VertexView, View};
@@ -297,9 +297,9 @@ where
         let EdgeView {
             mesh, key: source, ..
         } = self;
-        let joining = EdgeJoining::prepare(mesh, source, destination)?;
-        let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
-        let edge = join(&mut *mutation, joining)?;
+        let cache = EdgeJoinCache::snapshot(mesh, source, destination)?;
+        let mut mutation = Mutation::replace(mesh, Mesh::empty());
+        let edge = join_with_cache(&mut *mutation, cache)?;
         Ok(EdgeView::new(mutation.commit().unwrap(), edge))
     }
 }
@@ -324,9 +324,9 @@ where
         G: EdgeMidpoint<Midpoint = VertexPosition<G>>,
     {
         let EdgeView { mesh, key: ab, .. } = self;
-        let splitting = EdgeSplitting::prepare(mesh, ab)?;
-        let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
-        let vertex = split(&mut *mutation, splitting)?;
+        let cache = EdgeSplitCache::snapshot(mesh, ab)?;
+        let mut mutation = Mutation::replace(mesh, Mesh::empty());
+        let vertex = split_with_cache(&mut *mutation, cache)?;
         Ok(VertexView::new(mutation.commit().unwrap(), vertex))
     }
 }
@@ -356,9 +356,9 @@ where
         VertexPosition<G>: Add<ScaledEdgeLateral<G, T>, Output = VertexPosition<G>> + Clone,
     {
         let EdgeView { mesh, key: ab, .. } = self;
-        let extrusion = EdgeExtrusion::prepare(mesh, ab, distance)?;
-        let mut mutation = ImmediateMutation::replace(mesh, Mesh::empty());
-        let edge = extrude(&mut *mutation, extrusion)?;
+        let cache = EdgeExtrudeCache::snapshot(mesh, ab, distance)?;
+        let mut mutation = Mutation::replace(mesh, Mesh::empty());
+        let edge = extrude_with_cache(&mut *mutation, cache)?;
         Ok(EdgeView::new(mutation.commit().unwrap(), edge))
     }
 }
@@ -661,7 +661,7 @@ impl EdgeKeyTopology {
     }
 }
 
-pub(in graph) struct EdgeSplitting<G>
+pub(in graph) struct EdgeSplitCache<G>
 where
     G: Geometry,
 {
@@ -670,12 +670,12 @@ where
     midpoint: G::Vertex,
 }
 
-impl<G> EdgeSplitting<G>
+impl<G> EdgeSplitCache<G>
 where
     G: EdgeMidpoint<Midpoint = VertexPosition<G>> + Geometry,
     G::Vertex: AsPosition,
 {
-    pub fn prepare<C>(mesh: &Mesh<G, C>, ab: EdgeKey) -> Result<Self, Error>
+    pub fn snapshot<C>(mesh: &Mesh<G, C>, ab: EdgeKey) -> Result<Self, Error>
     where
         C: Consistency,
     {
@@ -686,7 +686,7 @@ where
         };
         let mut midpoint = edge.source_vertex().geometry.clone();
         *midpoint.as_position_mut() = edge.midpoint();
-        Ok(EdgeSplitting {
+        Ok(EdgeSplitCache {
             ab,
             ba: (b, a).into(),
             midpoint,
@@ -694,7 +694,7 @@ where
     }
 }
 
-pub(in graph) struct EdgeJoining<G>
+pub(in graph) struct EdgeJoinCache<G>
 where
     G: Geometry,
 {
@@ -704,11 +704,11 @@ where
     face: G::Face,
 }
 
-impl<G> EdgeJoining<G>
+impl<G> EdgeJoinCache<G>
 where
     G: Geometry,
 {
-    pub fn prepare<C>(
+    pub fn snapshot<C>(
         mesh: &Mesh<G, C>,
         source: EdgeKey,
         destination: EdgeKey,
@@ -730,8 +730,7 @@ where
                 return Err(GraphError::TopologyConflict.into());
             }
         }
-        // Insert a quad joining the edges. These operations should not fail;
-        // unwrap their results.
+        // Insert a quad joining the edges. These operations should not fail.
         let (edge, face) = {
             let source = mesh.edge(source).unwrap();
             (
@@ -744,7 +743,7 @@ where
                     .unwrap_or_else(Default::default),
             )
         };
-        Ok(EdgeJoining {
+        Ok(EdgeJoinCache {
             source,
             destination,
             edge,
@@ -753,7 +752,7 @@ where
     }
 }
 
-pub(in graph) struct EdgeExtrusion<G>
+pub(in graph) struct EdgeExtrudeCache<G>
 where
     G: Geometry,
 {
@@ -762,11 +761,11 @@ where
     edge: G::Edge,
 }
 
-impl<G> EdgeExtrusion<G>
+impl<G> EdgeExtrudeCache<G>
 where
     G: Geometry,
 {
-    pub fn prepare<T>(mesh: &Mesh<G, Consistent>, ab: EdgeKey, distance: T) -> Result<Self, Error>
+    pub fn snapshot<T>(mesh: &Mesh<G, Consistent>, ab: EdgeKey, distance: T) -> Result<Self, Error>
     where
         G: Geometry + EdgeLateral,
         G::Lateral: Mul<T>,
@@ -792,111 +791,116 @@ where
             *vertices.1.as_position_mut() = vertices.1.as_position().clone() + translation;
             (vertices, edge.geometry.clone())
         };
-        Ok(EdgeExtrusion { ab, vertices, edge })
+        Ok(EdgeExtrudeCache { ab, vertices, edge })
     }
 }
 
-pub(in graph) fn split<M, G>(
-    mutation: &mut M,
-    splitting: EdgeSplitting<G>,
+pub(in graph) fn split_with_cache<G>(
+    mutation: &mut Mutation<G>,
+    cache: EdgeSplitCache<G>,
 ) -> Result<VertexKey, Error>
 where
-    M: ModalMutation<G>,
     G: EdgeMidpoint<Midpoint = VertexPosition<G>> + Geometry,
     G::Vertex: AsPosition,
 {
-    fn split_at_vertex<M, G>(
-        mutation: &mut M,
+    // TODO: `Mutation` intentionally disallows direct mutable access to its
+    //       `Mesh`. Provide functionality for connecting topology to edges
+    //       instead.
+    fn split_at_vertex<G>(
+        mutation: &mut Mutation<G>,
         ab: EdgeKey,
         m: VertexKey,
     ) -> Result<(EdgeKey, EdgeKey), Error>
     where
-        M: ModalMutation<G>,
         G: EdgeMidpoint<Midpoint = VertexPosition<G>> + Geometry,
         G::Vertex: AsPosition,
     {
         // Remove the edge and insert two truncated edges in its place.
         let (a, b) = ab.to_vertex_keys();
-        let span = mutation.remove_edge(ab).unwrap();
+        let span = mutation.remove_edge(ab)?;
         let am = mutation.insert_edge((a, m), span.geometry.clone())?;
         let mb = mutation.insert_edge((m, b), span.geometry.clone())?;
         // Connect the new edges to each other and their leading edges.
+        mutation.connect_edges(am, mb)?;
+        if let Some(xa) = span.previous {
+            mutation.connect_edges(xa, am).map_conflict_to_ok()?;
+        }
+        if let Some(bx) = span.next {
+            mutation.connect_edges(mb, bx).map_conflict_to_ok()?;
+        }
         {
-            let mut edge = mutation.as_mesh_mut().edge_mut(am).unwrap();
+            let mut edge = mutation.mutant_mut().edge_mut(am)?;
             edge.next = Some(mb);
             edge.previous = span.previous;
             edge.face = span.face
         }
         {
-            let mut edge = mutation.as_mesh_mut().edge_mut(mb).unwrap();
+            let mut edge = mutation.mutant_mut().edge_mut(mb)?;
             edge.next = span.next;
             edge.previous = Some(am);
             edge.face = span.face;
         }
         if let Some(pa) = span.previous {
-            mutation.as_mesh_mut().edge_mut(pa).unwrap().next = Some(am);
+            mutation.mutant_mut().edge_mut(pa)?.next = Some(am);
         }
         if let Some(bn) = span.next {
-            mutation.as_mesh_mut().edge_mut(bn).unwrap().previous = Some(mb);
+            mutation.mutant_mut().edge_mut(bn)?.previous = Some(mb);
         }
         // Update the associated face, if any, because it may refer to the
         // removed edge.
         if let Some(face) = span.face {
-            mutation.as_mesh_mut().face_mut(face).unwrap().edge = am;
+            mutation.mutant_mut().face_mut(face)?.edge = am;
         }
         Ok((am, mb))
     }
 
-    let EdgeSplitting { ab, ba, midpoint } = splitting;
+    let EdgeSplitCache { ab, ba, midpoint } = cache;
     let m = mutation.insert_vertex(midpoint);
-    // Split the half-edges. This should not fail; unwrap the results.
-    split_at_vertex(mutation, ab, m).unwrap();
-    split_at_vertex(mutation, ba, m).unwrap();
+    // Split the half-edges.
+    split_at_vertex(mutation, ab, m)?;
+    split_at_vertex(mutation, ba, m)?;
     Ok(m)
 }
 
-pub(in graph) fn join<M, G>(mutation: &mut M, joining: EdgeJoining<G>) -> Result<EdgeKey, Error>
+pub(in graph) fn join_with_cache<G>(
+    mutation: &mut Mutation<G>,
+    cache: EdgeJoinCache<G>,
+) -> Result<EdgeKey, Error>
 where
-    M: ModalMutation<G>,
     G: Geometry,
 {
-    let EdgeJoining {
+    let EdgeJoinCache {
         source,
         destination,
         edge,
         face,
-    } = joining;
+    } = cache;
     let (a, b) = source.to_vertex_keys();
     let (c, d) = destination.to_vertex_keys();
     // TODO: Split the face to form triangles.
-    mutation
-        .insert_face(
-            FaceInsertion::prepare(mutation.as_mesh(), &[a, b, c, d], (edge, face)).unwrap(),
-        )
-        .unwrap();
+    mutation.insert_face(&[a, b, c, d], (edge, face))?;
     Ok(source)
 }
 
-pub(in graph) fn extrude<M, G, T>(
-    mutation: &mut M,
-    extrusion: EdgeExtrusion<G>,
+pub(in graph) fn extrude_with_cache<M, G, T>(
+    mutation: &mut Mutation<G>,
+    cache: EdgeExtrudeCache<G>,
 ) -> Result<EdgeKey, Error>
 where
-    M: ModalMutation<G>,
     G: Geometry + EdgeLateral,
     G::Lateral: Mul<T>,
     G::Vertex: AsPosition,
     ScaledEdgeLateral<G, T>: Clone,
     VertexPosition<G>: Add<ScaledEdgeLateral<G, T>, Output = VertexPosition<G>> + Clone,
 {
-    let EdgeExtrusion { ab, vertices, edge } = extrusion;
+    let EdgeExtrudeCache { ab, vertices, edge } = cache;
     let c = mutation.insert_vertex(vertices.0);
     let d = mutation.insert_vertex(vertices.1);
-    let cd = mutation.insert_edge((c, d), edge).unwrap();
-    Ok(join(
+    let cd = mutation.insert_edge((c, d), edge)?;
+    join_with_cache(
         mutation,
-        EdgeJoining::prepare(mutation.as_mesh(), ab, cd).unwrap(),
-    ).unwrap())
+        EdgeJoinCache::snapshot(mutation.mutant(), ab, cd)?,
+    )
 }
 
 #[cfg(test)]

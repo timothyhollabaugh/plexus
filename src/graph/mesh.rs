@@ -15,11 +15,11 @@ use geometry::Geometry;
 use geometry::convert::{FromGeometry, FromInteriorGeometry, IntoGeometry, IntoInteriorGeometry};
 use graph::{GraphError, Perimeter};
 use graph::geometry::FaceCentroid;
-use graph::mutation::{BatchMutation, FaceInsertion, ModalMutation};
+use graph::mutation::{Commit, Mutate, Mutation};
 use graph::storage::{EdgeKey, FaceKey, Storage, StorageIter, StorageIterMut, VertexKey};
 use graph::topology::{EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut,
                       OrphanVertexMut, OrphanView, Topological, VertexMut, VertexRef, View};
-use graph::topology::face::{self, FaceTriangulation};
+use graph::topology::face::{self, FaceTriangulateCache};
 
 pub trait Consistency {}
 
@@ -534,7 +534,7 @@ where
         J: IntoIterator,
         J::Item: IntoGeometry<G::Vertex>,
     {
-        let mut mutation = BatchMutation::mutate(Mesh::new());
+        let mut mutation = Mutation::mutate(Mesh::new());
         let vertices = vertices
             .into_iter()
             .map(|vertex| mutation.insert_vertex(vertex.into_geometry()))
@@ -554,11 +554,7 @@ where
                     .get(index)
                     .ok_or_else(|| Error::from(GraphError::TopologyNotFound))?);
             }
-            mutation.insert_face(FaceInsertion::prepare(
-                mutation.as_mesh(),
-                &perimeter,
-                Default::default(),
-            )?)?;
+            mutation.insert_face(&perimeter, Default::default())?;
         }
         mutation.commit()
     }
@@ -568,14 +564,14 @@ where
     where
         G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
     {
-        let triangulations = self.faces
+        let caches = self.faces
             .keys()
             .cloned()
-            .flat_map(|key| FaceTriangulation::prepare(self, key.into()).ok())
+            .flat_map(|key| FaceTriangulateCache::snapshot(self, key.into()).ok())
             .collect::<Vec<_>>();
-        let mut mutation = BatchMutation::replace(self, Mesh::empty());
-        for triangulation in triangulations {
-            let _ = face::triangulate(&mut *mutation, triangulation);
+        let mut mutation = Mutation::replace(self, Mesh::empty());
+        for cache in caches {
+            let _ = face::triangulate_with_cache(&mut *mutation, cache);
         }
         mutation.commit().unwrap();
         Ok(())
@@ -764,7 +760,7 @@ where
         I: IntoIterator<Item = P>,
         N: Indexer<P, P::Vertex>,
     {
-        let mut mutation = BatchMutation::mutate(Mesh::new());
+        let mut mutation = Mutation::mutate(Mesh::new());
         let (indeces, vertices) = input.into_iter().index_vertices(indexer);
         let vertices = vertices
             .into_iter()
@@ -779,10 +775,7 @@ where
                 perimeter.push(vertices[index]);
             }
             mutation
-                .insert_face(
-                    FaceInsertion::prepare(mutation.as_mesh(), &perimeter, Default::default())
-                        .unwrap(),
-                )
+                .insert_face(&perimeter, Default::default())
                 .unwrap();
         }
         mutation.commit().unwrap()
@@ -907,7 +900,7 @@ mod tests {
     use generate::*;
     use geometry::*;
     use graph::*;
-    use graph::mutation::{ImmediateMutation, ModalMutation};
+    use graph::mutation::{Mutate, Mutation};
 
     #[test]
     fn collect_topology_into_mesh() {
@@ -1028,7 +1021,7 @@ mod tests {
             })
             .unwrap()
             .key();
-        let mut mutation = ImmediateMutation::mutate(mesh);
+        let mut mutation = Mutation::mutate(mesh);
         assert!(match *mutation
             .remove_face(key)
             .err()
