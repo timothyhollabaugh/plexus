@@ -1,13 +1,13 @@
 use decorum::{R32, Real};
-use num::{NumCast, One};
 use num::traits::FloatConst;
+use num::{NumCast, One};
 use std::cmp;
 
-use generate::Half;
 use generate::generate::{IndexGenerator, IndexPolygonGenerator, PolygonGenerator,
                          PositionGenerator, PositionPolygonGenerator, PositionVertexGenerator,
                          VertexGenerator};
 use generate::topology::{Polygon, Quad, Triangle};
+use generate::Half;
 use geometry::Triplet;
 
 #[derive(Clone, Copy)]

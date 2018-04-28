@@ -7,19 +7,19 @@ use std::hash::Hash;
 use std::iter::FromIterator;
 use std::marker::PhantomData;
 
-use BoolExt;
 use buffer::MeshBuffer;
 use generate::{self, Arity, FromIndexer, HashIndexer, IndexVertices, Indexer, IntoVertices,
                MapVerticesInto, Quad};
-use geometry::Geometry;
 use geometry::convert::{FromGeometry, FromInteriorGeometry, IntoGeometry, IntoInteriorGeometry};
-use graph::{GraphError, Perimeter};
+use geometry::Geometry;
 use graph::geometry::FaceCentroid;
 use graph::mutation::{Commit, Mutate, Mutation};
-use graph::storage::{EdgeKey, FaceKey, Storage, StorageIter, StorageIterMut, VertexKey};
+use graph::storage::{self, EdgeKey, FaceKey, Storage, VertexKey};
+use graph::topology::face::{self, FaceTriangulateCache};
 use graph::topology::{EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut,
                       OrphanVertexMut, OrphanView, Topological, VertexMut, VertexRef, View};
-use graph::topology::face::{self, FaceTriangulateCache};
+use graph::{GraphError, Perimeter};
+use BoolExt;
 
 pub trait Consistency {}
 
@@ -36,7 +36,8 @@ pub struct Vertex<G>
 where
     G: Geometry,
 {
-    #[derivative(Debug = "ignore", Hash = "ignore")] pub geometry: G::Vertex,
+    #[derivative(Debug = "ignore", Hash = "ignore")]
+    pub geometry: G::Vertex,
     pub(super) edge: Option<EdgeKey>,
 }
 
@@ -81,7 +82,8 @@ pub struct Edge<G>
 where
     G: Geometry,
 {
-    #[derivative(Debug = "ignore", Hash = "ignore")] pub geometry: G::Edge,
+    #[derivative(Debug = "ignore", Hash = "ignore")]
+    pub geometry: G::Edge,
     pub(super) vertex: VertexKey,
     pub(super) opposite: Option<EdgeKey>,
     pub(super) next: Option<EdgeKey>,
@@ -138,7 +140,8 @@ pub struct Face<G>
 where
     G: Geometry,
 {
-    #[derivative(Debug = "ignore", Hash = "ignore")] pub geometry: G::Face,
+    #[derivative(Debug = "ignore", Hash = "ignore")]
+    pub geometry: G::Face,
     pub(super) edge: EdgeKey,
 }
 
@@ -806,7 +809,7 @@ where
     C: 'a + Consistency,
 {
     mesh: &'a Mesh<G, C>,
-    input: StorageIter<'a, T::Topology>,
+    input: storage::Iter<'a, T::Topology>,
     phantom: PhantomData<C>,
 }
 
@@ -816,7 +819,7 @@ where
     G: Geometry,
     C: Consistency,
 {
-    fn new(mesh: &'a Mesh<G, C>, input: StorageIter<'a, T::Topology>) -> Self {
+    fn new(mesh: &'a Mesh<G, C>, input: storage::Iter<'a, T::Topology>) -> Self {
         MeshIter {
             mesh: mesh,
             input: input,
@@ -846,7 +849,7 @@ where
     G: 'a + Geometry,
     C: Consistency,
 {
-    input: StorageIterMut<'a, T::Topology>,
+    input: storage::IterMut<'a, T::Topology>,
     phantom: PhantomData<C>,
 }
 
@@ -856,7 +859,7 @@ where
     G: Geometry,
     C: Consistency,
 {
-    fn new(input: StorageIterMut<'a, T::Topology>) -> Self {
+    fn new(input: storage::IterMut<'a, T::Topology>) -> Self {
         MeshIterMut {
             input,
             phantom: PhantomData,
@@ -899,8 +902,8 @@ mod tests {
 
     use generate::*;
     use geometry::*;
-    use graph::*;
     use graph::mutation::{Mutate, Mutation};
+    use graph::*;
 
     #[test]
     fn collect_topology_into_mesh() {

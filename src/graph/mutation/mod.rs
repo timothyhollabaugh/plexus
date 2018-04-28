@@ -86,7 +86,9 @@ where
         self.mutation.take().unwrap()
     }
 
-    fn drain_and_commit(&mut self) -> Result<<Self as Mode<G>>::Mutant, <Self as Commit<G>>::Error> {
+    fn drain_and_commit(
+        &mut self,
+    ) -> Result<<Self as Mode<G>>::Mutant, <Self as Commit<G>>::Error> {
         let (mesh, mutation) = self.drain();
         let mutant = mutation.commit()?;
         mem::replace(mesh, mutant);

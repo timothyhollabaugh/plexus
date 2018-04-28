@@ -2,10 +2,10 @@ use failure::Error;
 use std::collections::HashSet;
 
 use geometry::Geometry;
-use graph::GraphError;
 use graph::mesh::{Inconsistent, Mesh, Vertex};
 use graph::mutation::{Commit, Mode, Mutate};
 use graph::storage::{EdgeKey, VertexKey};
+use graph::GraphError;
 
 pub struct VertexMutation<G>
 where
@@ -28,9 +28,7 @@ where
     }
 
     pub fn insert_vertex(&mut self, geometry: G::Vertex) -> VertexKey {
-        self.mutant_mut()
-            .vertices
-            .insert_with_generator(Vertex::new(geometry))
+        self.mutant_mut().vertices.insert(Vertex::new(geometry))
     }
 
     pub fn connect_outgoing_edge(&mut self, a: VertexKey, ab: EdgeKey) -> Result<(), Error> {

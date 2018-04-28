@@ -164,15 +164,16 @@ pub type FaceMut<'a, G> = self::topology::FaceMut<'a, G, Consistent>;
 
 #[derive(Debug, Fail)]
 pub enum GraphError {
-    #[fail(display = "required topology not found")] TopologyNotFound,
-    #[fail(display = "conflicting topology found")] TopologyConflict,
-    #[fail(display = "topology malformed")] TopologyMalformed,
+    #[fail(display = "required topology not found")]
+    TopologyNotFound,
+    #[fail(display = "conflicting topology found")]
+    TopologyConflict,
+    #[fail(display = "topology malformed")]
+    TopologyMalformed,
     #[fail(display = "conflicting arity; expected {}, but got {}", expected, actual)]
-    ArityConflict {
-        expected: usize,
-        actual: usize,
-    },
-    #[fail(display = "face arity is non-constant")] ArityNonConstant,
+    ArityConflict { expected: usize, actual: usize },
+    #[fail(display = "face arity is non-constant")]
+    ArityNonConstant,
 }
 
 // TODO: Using `Error` so broadly is a misuse case. Look at how complex

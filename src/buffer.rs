@@ -56,7 +56,8 @@ use geometry::convert::IntoGeometry;
 
 #[derive(Debug, Fail)]
 pub enum BufferError {
-    #[fail(display = "index into vertex data out of bounds")] IndexOutOfBounds,
+    #[fail(display = "index into vertex data out of bounds")]
+    IndexOutOfBounds,
 }
 
 /// Linear buffer of mesh data.

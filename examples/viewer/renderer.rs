@@ -1,8 +1,8 @@
-use gfx::{CommandBuffer, Device, Encoder, Factory, PipelineState, Primitive, Resources};
 use gfx::format::{DepthStencil, Rgba8};
 use gfx::handle::{DepthStencilView, RenderTargetView};
 use gfx::state::Rasterizer;
 use gfx::traits::FactoryExt;
+use gfx::{CommandBuffer, Device, Encoder, Factory, PipelineState, Primitive, Resources};
 use gfx_device_gl;
 use gfx_window_glutin;
 use glutin::{GlContext, GlWindow};

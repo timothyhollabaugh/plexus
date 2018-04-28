@@ -6,12 +6,12 @@
 
 use std::ops::{Add, Sub};
 
-use geometry::Geometry;
+use self::alias::*;
 use geometry::convert::AsPosition;
 use geometry::ops::{Average, Cross, Interpolate, Normalize, Project};
+use geometry::Geometry;
 use graph::mesh::Consistent;
 use graph::topology::{EdgeRef, FaceRef};
-use self::alias::*;
 
 pub trait FaceNormal: Geometry {
     type Normal;
@@ -91,7 +91,10 @@ where
     G: Geometry,
     G::Vertex: AsPosition,
     VertexPosition<G>: Clone
-        + Add<<<VertexPosition<G> as Sub>::Output as Project>::Output, Output = VertexPosition<G>>
+        + Add<
+            <<VertexPosition<G> as Sub>::Output as Project>::Output,
+            Output = VertexPosition<G>,
+        >
         + Sub,
     <VertexPosition<G> as Sub>::Output: Normalize + Project,
 {

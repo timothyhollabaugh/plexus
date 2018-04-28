@@ -3,17 +3,17 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::ops::{Add, Deref, DerefMut, Mul};
 
-use geometry::Geometry;
 use geometry::convert::AsPosition;
-use graph::{GraphError, Perimeter};
-use graph::geometry::{FaceCentroid, FaceNormal};
+use geometry::Geometry;
 use graph::geometry::alias::{ScaledFaceNormal, VertexPosition};
+use graph::geometry::{FaceCentroid, FaceNormal};
 use graph::mesh::{Consistency, Consistent, Edge, Face, Mesh, Vertex};
 use graph::mutation::{Commit, FaceRemoveCache, Mutation};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
+use graph::topology::edge::{self, EdgeJoinCache};
 use graph::topology::{EdgeKeyTopology, EdgeView, OrphanEdgeView, OrphanVertexView, OrphanView,
                       Topological, VertexView, View};
-use graph::topology::edge::{self, EdgeJoinCache};
+use graph::{GraphError, Perimeter};
 
 /// Do **not** use this type directly. Use `FaceRef` and `FaceMut` instead.
 ///

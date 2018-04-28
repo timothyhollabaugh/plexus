@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 
 use geometry::Geometry;
-use graph::{GraphError, ResultExt};
 use graph::mesh::{Edge, Inconsistent, Mesh};
-use graph::mutation::{Commit, Mode, Mutate};
 use graph::mutation::vertex::VertexMutation;
+use graph::mutation::{Commit, Mode, Mutate};
 use graph::storage::{EdgeKey, VertexKey};
+use graph::{GraphError, ResultExt};
 
 pub struct EdgeMutation<G>
 where
@@ -74,8 +74,7 @@ where
         let (a, _) = ab.to_vertex_keys();
         self.disconnect_next_edge(ab).map_conflict_to_ok()?;
         self.disconnect_previous_edge(ab).map_conflict_to_ok()?;
-        self.disconnect_outgoing_edge(a)
-            .map_conflict_to_ok()?;
+        self.disconnect_outgoing_edge(a).map_conflict_to_ok()?;
         Ok(self.mutant_mut().edges.remove(&ab).unwrap())
     }
 

@@ -4,12 +4,12 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
 use geometry::Geometry;
-use graph::{GraphError, Perimeter};
 use graph::mesh::{Connectivity, Consistency, Consistent, Face, Inconsistent, Mesh, Region,
                   Singularity};
-use graph::mutation::{Commit, Mode, Mutate};
 use graph::mutation::edge::EdgeMutation;
+use graph::mutation::{Commit, Mode, Mutate};
 use graph::storage::{EdgeKey, FaceKey, VertexKey};
+use graph::{GraphError, Perimeter};
 
 pub struct FaceMutation<G>
 where
@@ -62,7 +62,7 @@ where
         // Insert the face and add it to the set of touched faces.
         let face = self.mutant_mut()
             .faces
-            .insert_with_generator(Face::new(edges[0], geometry.1));
+            .insert(Face::new(edges[0], geometry.1));
         self.touched.insert(face);
         // If a singularity was detected, record it and its neighboring faces.
         if let Some(singularity) = singularity {
