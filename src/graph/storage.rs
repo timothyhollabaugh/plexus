@@ -1,6 +1,6 @@
-/// Storage for topological data in a mesh.
+//! Storage for topological data in a mesh.
+
 use std::collections::{hash_map, HashMap};
-//use std::collections::hash_map::{Iter, IterMut, Keys};
 use std::hash::Hash;
 
 use graph::topology::Topological;
@@ -208,11 +208,11 @@ where
     }
 }
 
-impl<T> Storage<T>
+impl<T, K> Storage<T>
 where
     T: Topological,
-    T::Key: From<u64> + OpaqueKey<Inner = u64, Implicit = u64>,
-    <T::Key as OpaqueKey>::Inner: ImplicitKey,
+    T::Key: From<K> + OpaqueKey<Inner = K, Implicit = K>,
+    K: Eq + Hash + ImplicitKey,
 {
     pub fn insert(&mut self, item: T) -> T::Key {
         let key = self.implicit;
