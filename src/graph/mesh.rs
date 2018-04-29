@@ -280,8 +280,8 @@ where
     }
 
     /// Gets an iterator of immutable views over the vertices in the mesh.
-    pub fn vertices(&self) -> MeshIter<VertexRef<G, C>, G, C> {
-        MeshIter::new(self, self.vertices.iter())
+    pub fn vertices(&self) -> Iter<VertexRef<G, C>, G, C> {
+        Iter::new(self, self.vertices.iter())
     }
 
     /// Gets an iterator of orphan views over the vertices in the mesh.
@@ -289,8 +289,8 @@ where
     /// Because this only yields orphan views, only geometry can be mutated.
     /// For topological mutations, collect the necessary keys and use
     /// `vertex_mut` instead.
-    pub fn vertices_mut(&mut self) -> MeshIterMut<OrphanVertexMut<G>, G, C> {
-        MeshIterMut::new(self.vertices.iter_mut())
+    pub fn vertices_mut(&mut self) -> IterMut<OrphanVertexMut<G>, G, C> {
+        IterMut::new(self.vertices.iter_mut())
     }
 
     /// Gets the number of edges in the mesh.
@@ -317,8 +317,8 @@ where
     }
 
     /// Gets an iterator of immutable views over the edges in the mesh.
-    pub fn edges(&self) -> MeshIter<EdgeRef<G, C>, G, C> {
-        MeshIter::new(self, self.edges.iter())
+    pub fn edges(&self) -> Iter<EdgeRef<G, C>, G, C> {
+        Iter::new(self, self.edges.iter())
     }
 
     /// Gets an iterator of orphan views over the edges in the mesh.
@@ -326,8 +326,8 @@ where
     /// Because this only yields orphan views, only geometry can be mutated.
     /// For topological mutations, collect the necessary keys and use
     /// `edge_mut` instead.
-    pub fn edges_mut(&mut self) -> MeshIterMut<OrphanEdgeMut<G>, G, C> {
-        MeshIterMut::new(self.edges.iter_mut())
+    pub fn edges_mut(&mut self) -> IterMut<OrphanEdgeMut<G>, G, C> {
+        IterMut::new(self.edges.iter_mut())
     }
 
     /// Gets the number of faces in the mesh.
@@ -354,8 +354,8 @@ where
     }
 
     /// Gets an iterator of immutable views over the faces in the mesh.
-    pub fn faces(&self) -> MeshIter<FaceRef<G, C>, G, C> {
-        MeshIter::new(self, self.faces.iter())
+    pub fn faces(&self) -> Iter<FaceRef<G, C>, G, C> {
+        Iter::new(self, self.faces.iter())
     }
 
     /// Gets an iterator of orphan views over the faces in the mesh.
@@ -363,8 +363,8 @@ where
     /// Because this only yields orphan views, only geometry can be mutated.
     /// For topological mutations, collect the necessary keys and use
     /// `face_mut` instead.
-    pub fn faces_mut(&mut self) -> MeshIterMut<OrphanFaceMut<G>, G, C> {
-        MeshIterMut::new(self.faces.iter_mut())
+    pub fn faces_mut(&mut self) -> IterMut<OrphanFaceMut<G>, G, C> {
+        IterMut::new(self.faces.iter_mut())
     }
 
     pub(in graph) fn region<'a>(&self, vertices: &'a [VertexKey]) -> Result<Region<'a>, Error> {
@@ -801,7 +801,7 @@ where
     }
 }
 
-pub struct MeshIter<'a, T, G, C>
+pub struct Iter<'a, T, G, C>
 where
     T: 'a + View<&'a Mesh<G, C>, G, C>,
     T::Topology: 'a,
@@ -813,14 +813,14 @@ where
     phantom: PhantomData<C>,
 }
 
-impl<'a, T, G, C> MeshIter<'a, T, G, C>
+impl<'a, T, G, C> Iter<'a, T, G, C>
 where
     T: View<&'a Mesh<G, C>, G, C>,
     G: Geometry,
     C: Consistency,
 {
     fn new(mesh: &'a Mesh<G, C>, input: storage::Iter<'a, T::Topology>) -> Self {
-        MeshIter {
+        Iter {
             mesh: mesh,
             input: input,
             phantom: PhantomData,
@@ -828,7 +828,7 @@ where
     }
 }
 
-impl<'a, T, G, C> Iterator for MeshIter<'a, T, G, C>
+impl<'a, T, G, C> Iterator for Iter<'a, T, G, C>
 where
     T: View<&'a Mesh<G, C>, G, C>,
     G: Geometry,
@@ -843,7 +843,7 @@ where
     }
 }
 
-pub struct MeshIterMut<'a, T, G, C>
+pub struct IterMut<'a, T, G, C>
 where
     T: 'a + OrphanView<'a, G>,
     G: 'a + Geometry,
@@ -853,21 +853,21 @@ where
     phantom: PhantomData<C>,
 }
 
-impl<'a, T, G, C> MeshIterMut<'a, T, G, C>
+impl<'a, T, G, C> IterMut<'a, T, G, C>
 where
     T: OrphanView<'a, G>,
     G: Geometry,
     C: Consistency,
 {
     fn new(input: storage::IterMut<'a, T::Topology>) -> Self {
-        MeshIterMut {
+        IterMut {
             input,
             phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T, G, C> Iterator for MeshIterMut<'a, T, G, C>
+impl<'a, T, G, C> Iterator for IterMut<'a, T, G, C>
 where
     T: OrphanView<'a, G>,
     G: Geometry,
