@@ -5,6 +5,7 @@ use num::{Integer, NumCast, Unsigned};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::iter::FromIterator;
+use std::marker::PhantomData;
 
 use buffer::MeshBuffer;
 use generate::{
@@ -15,7 +16,8 @@ use geometry::convert::{FromGeometry, FromInteriorGeometry, IntoGeometry, IntoIn
 use geometry::Geometry;
 use graph::geometry::FaceCentroid;
 use graph::mutation::{ModalMutation, Mutation};
-use graph::storage::{self, EdgeKey, FaceKey, Storage, VertexKey};
+use graph::storage::alias::InnerKey;
+use graph::storage::{EdgeKey, FaceKey, Storage, VertexKey};
 use graph::topology::{
     EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut, OrphanVertexMut, OrphanView,
     Topological, VertexMut, VertexRef, View,
@@ -336,7 +338,7 @@ where
     }
 
     /// Gets an iterator of immutable views over the vertices in the mesh.
-    pub fn vertices(&self) -> Iter<VertexRef<G>, G> {
+    pub fn vertices(&self) -> impl Iterator<Item = VertexRef<G>> {
         Iter::new(self, self.vertices.iter())
     }
 
@@ -345,7 +347,7 @@ where
     /// Because this only yields orphan views, only geometry can be mutated.
     /// For topological mutations, collect the necessary keys and use
     /// `vertex_mut` instead.
-    pub fn vertices_mut(&mut self) -> IterMut<OrphanVertexMut<G>, G> {
+    pub fn vertices_mut(&mut self) -> impl Iterator<Item = OrphanVertexMut<G>> {
         IterMut::new(self.vertices.iter_mut())
     }
 
@@ -373,7 +375,7 @@ where
     }
 
     /// Gets an iterator of immutable views over the edges in the mesh.
-    pub fn edges(&self) -> Iter<EdgeRef<G>, G> {
+    pub fn edges(&self) -> impl Iterator<Item = EdgeRef<G>> {
         Iter::new(self, self.edges.iter())
     }
 
@@ -382,7 +384,7 @@ where
     /// Because this only yields orphan views, only geometry can be mutated.
     /// For topological mutations, collect the necessary keys and use
     /// `edge_mut` instead.
-    pub fn edges_mut(&mut self) -> IterMut<OrphanEdgeMut<G>, G> {
+    pub fn edges_mut(&mut self) -> impl Iterator<Item = OrphanEdgeMut<G>> {
         IterMut::new(self.edges.iter_mut())
     }
 
@@ -410,7 +412,7 @@ where
     }
 
     /// Gets an iterator of immutable views over the faces in the mesh.
-    pub fn faces(&self) -> Iter<FaceRef<G>, G> {
+    pub fn faces(&self) -> impl Iterator<Item = FaceRef<G>> {
         Iter::new(self, self.faces.iter())
     }
 
@@ -419,7 +421,7 @@ where
     /// Because this only yields orphan views, only geometry can be mutated.
     /// For topological mutations, collect the necessary keys and use
     /// `face_mut` instead.
-    pub fn faces_mut(&mut self) -> IterMut<OrphanFaceMut<G>, G> {
+    pub fn faces_mut(&mut self) -> impl Iterator<Item = OrphanFaceMut<G>> {
         IterMut::new(self.faces.iter_mut())
     }
 
@@ -753,33 +755,38 @@ where
     }
 }
 
-pub struct Iter<'a, T, G>
+pub struct Iter<'a, I, T, G>
 where
+    I: 'a + Iterator<Item = (&'a InnerKey<T::Topology>, &'a T::Topology)>,
     T: 'a + View<&'a Mesh<G>, G>,
     T::Topology: 'a,
     G: 'a + Geometry,
 {
     mesh: &'a Mesh<G>,
-    input: storage::Iter<'a, T::Topology>,
+    input: I,
+    phantom: PhantomData<T>,
 }
 
-impl<'a, T, G> Iter<'a, T, G>
+impl<'a, I, T, G> Iter<'a, I, T, G>
 where
-    T: View<&'a Mesh<G>, G>,
-    G: Geometry,
+    I: 'a + Iterator<Item = (&'a InnerKey<T::Topology>, &'a T::Topology)>,
+    T: 'a + View<&'a Mesh<G>, G>,
+    G: 'a + Geometry,
 {
-    fn new(mesh: &'a Mesh<G>, input: storage::Iter<'a, T::Topology>) -> Self {
+    fn new(mesh: &'a Mesh<G>, input: I) -> Self {
         Iter {
             mesh: mesh,
             input: input,
+            phantom: PhantomData,
         }
     }
 }
 
-impl<'a, T, G> Iterator for Iter<'a, T, G>
+impl<'a, I, T, G> Iterator for Iter<'a, I, T, G>
 where
-    T: View<&'a Mesh<G>, G>,
-    G: Geometry,
+    I: 'a + Iterator<Item = (&'a InnerKey<T::Topology>, &'a T::Topology)>,
+    T: 'a + View<&'a Mesh<G>, G>,
+    G: 'a + Geometry,
 {
     type Item = T;
 
@@ -790,28 +797,35 @@ where
     }
 }
 
-pub struct IterMut<'a, T, G>
+pub struct IterMut<'a, I, T, G>
 where
+    I: 'a + Iterator<Item = (&'a InnerKey<T::Topology>, &'a mut T::Topology)>,
     T: 'a + OrphanView<'a, G>,
     G: 'a + Geometry,
 {
-    input: storage::IterMut<'a, T::Topology>,
+    input: I,
+    phantom: PhantomData<(T, G)>,
 }
 
-impl<'a, T, G> IterMut<'a, T, G>
+impl<'a, I, T, G> IterMut<'a, I, T, G>
 where
-    T: OrphanView<'a, G>,
-    G: Geometry,
+    I: 'a + Iterator<Item = (&'a InnerKey<T::Topology>, &'a mut T::Topology)>,
+    T: 'a + OrphanView<'a, G>,
+    G: 'a + Geometry,
 {
-    fn new(input: storage::IterMut<'a, T::Topology>) -> Self {
-        IterMut { input: input }
+    fn new(input: I) -> Self {
+        IterMut {
+            input: input,
+            phantom: PhantomData,
+        }
     }
 }
 
-impl<'a, T, G> Iterator for IterMut<'a, T, G>
+impl<'a, I, T, G> Iterator for IterMut<'a, I, T, G>
 where
-    T: OrphanView<'a, G>,
-    G: Geometry,
+    I: 'a + Iterator<Item = (&'a InnerKey<T::Topology>, &'a mut T::Topology)>,
+    T: 'a + OrphanView<'a, G>,
+    G: 'a + Geometry,
 {
     type Item = T;
 

@@ -1,8 +1,9 @@
 //! Storage for topological data in a mesh.
 
-use std::collections::{hash_map, HashMap};
+use std::collections::HashMap;
 use std::hash::Hash;
 
+use self::alias::*;
 use graph::topology::Topological;
 
 pub trait ImplicitKey: Copy + Default + Sized {
@@ -124,16 +125,12 @@ impl From<FaceKey> for Key {
     }
 }
 
-pub type Iter<'a, T> = hash_map::Iter<'a, <<T as Topological>::Key as OpaqueKey>::Inner, T>;
-pub type IterMut<'a, T> = hash_map::IterMut<'a, <<T as Topological>::Key as OpaqueKey>::Inner, T>;
-pub type Keys<'a, T> = hash_map::Keys<'a, <<T as Topological>::Key as OpaqueKey>::Inner, T>;
-
 pub struct Storage<T>
 where
     T: Topological,
 {
-    implicit: <<T as Topological>::Key as OpaqueKey>::Implicit,
-    hash: HashMap<<<T as Topological>::Key as OpaqueKey>::Inner, T>,
+    implicit: InnerImplicitKey<T>,
+    hash: HashMap<InnerKey<T>, T>,
 }
 
 impl<T> Storage<T>
@@ -175,15 +172,15 @@ where
         self.hash.len()
     }
 
-    pub fn iter(&self) -> Iter<T> {
+    pub fn iter(&self) -> impl Iterator<Item = (&InnerKey<T>, &T)> {
         self.hash.iter()
     }
 
-    pub fn iter_mut(&mut self) -> IterMut<T> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&InnerKey<T>, &mut T)> {
         self.hash.iter_mut()
     }
 
-    pub fn keys(&self) -> Keys<T> {
+    pub fn keys(&self) -> impl Iterator<Item = &InnerKey<T>> {
         self.hash.keys()
     }
 
@@ -220,4 +217,11 @@ where
         self.implicit = self.implicit.into_next_key();
         key.into()
     }
+}
+
+pub mod alias {
+    use super::*;
+
+    pub type InnerKey<T> = <<T as Topological>::Key as OpaqueKey>::Inner;
+    pub type InnerImplicitKey<T> = <<T as Topological>::Key as OpaqueKey>::Implicit;
 }
