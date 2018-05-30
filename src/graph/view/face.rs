@@ -9,7 +9,7 @@ use graph::geometry::{FaceCentroid, FaceNormal};
 use graph::mesh::{Edge, Face, Mesh, Vertex};
 use graph::mutation::{ModalMutation, Mutation};
 use graph::storage::{EdgeKey, FaceKey, Topological, VertexKey};
-use graph::topology::{
+use graph::view::{
     edge, EdgeKeyTopology, EdgeView, OrphanEdgeView, OrphanVertexView, OrphanView, VertexView, View,
 };
 use graph::{GraphError, Perimeter};

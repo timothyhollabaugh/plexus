@@ -10,7 +10,7 @@ use graph::geometry::{EdgeLateral, EdgeMidpoint};
 use graph::mesh::{Edge, Face, Mesh, Vertex};
 use graph::mutation::{ModalMutation, Mutation};
 use graph::storage::{EdgeKey, FaceKey, Topological, VertexKey};
-use graph::topology::{FaceView, OrphanFaceView, OrphanVertexView, OrphanView, VertexView, View};
+use graph::view::{FaceView, OrphanFaceView, OrphanVertexView, OrphanView, VertexView, View};
 use graph::{GraphError, Perimeter};
 
 /// Do **not** use this type directly. Use `EdgeRef` and `EdgeMut` instead.

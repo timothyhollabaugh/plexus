@@ -20,7 +20,7 @@ use graph::storage::alias::InnerKey;
 use graph::storage::{
     AsStorage, AsStorageMut, Bind, EdgeKey, FaceKey, Storage, Topological, VertexKey,
 };
-use graph::topology::{
+use graph::view::{
     EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut, OrphanVertexMut, OrphanView,
     VertexMut, VertexRef, View,
 };

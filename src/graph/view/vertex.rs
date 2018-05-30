@@ -4,7 +4,7 @@ use std::ops::{Deref, DerefMut};
 use geometry::Geometry;
 use graph::mesh::{Edge, Face, Mesh, Vertex};
 use graph::storage::{EdgeKey, FaceKey, Topological, VertexKey};
-use graph::topology::{EdgeView, FaceView, OrphanEdgeView, OrphanFaceView, OrphanView, View};
+use graph::view::{EdgeView, FaceView, OrphanEdgeView, OrphanFaceView, OrphanView, View};
 
 /// Do **not** use this type directly. Use `VertexRef` and `VertexMut` instead.
 ///

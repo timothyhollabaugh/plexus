@@ -11,7 +11,7 @@ use self::alias::*;
 use geometry::convert::AsPosition;
 use geometry::ops::{Average, Cross, Interpolate, Normalize, Project};
 use geometry::Geometry;
-use graph::topology::{EdgeRef, FaceRef};
+use graph::view::{EdgeRef, FaceRef};
 
 pub trait FaceNormal: Geometry {
     type Normal;
