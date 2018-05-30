@@ -202,7 +202,6 @@ pub type Connectivity = HashMap<VertexKey, Vec<EdgeKey>>;
 pub type Singularity = (VertexKey, Vec<FaceKey>);
 
 /// Abstract and ephemeral core mesh storage.
-#[derive(Clone, Default)]
 pub struct Core<V = (), E = (), F = ()>(V, E, F);
 
 impl Core {
@@ -371,7 +370,7 @@ where
     /// let mut mesh = Mesh::<()>::new();
     /// ```
     pub fn new() -> Self {
-        Self::default()
+        Core(Storage::new(), Storage::new(), Storage::new())
     }
 
     /// Creates an empty `Mesh`.
