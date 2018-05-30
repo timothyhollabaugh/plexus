@@ -3,10 +3,8 @@ use std::ops::{Deref, DerefMut};
 
 use geometry::Geometry;
 use graph::mesh::{Edge, Face, Mesh, Vertex};
-use graph::storage::{EdgeKey, FaceKey, VertexKey};
-use graph::topology::{
-    EdgeView, FaceView, OrphanEdgeView, OrphanFaceView, OrphanView, Topological, View,
-};
+use graph::storage::{EdgeKey, FaceKey, Topological, VertexKey};
+use graph::topology::{EdgeView, FaceView, OrphanEdgeView, OrphanFaceView, OrphanView, View};
 
 /// Do **not** use this type directly. Use `VertexRef` and `VertexMut` instead.
 ///
@@ -143,7 +141,11 @@ where
     type Target = Vertex<G>;
 
     fn deref(&self) -> &Self::Target {
-        self.mesh.as_ref().vertices.get(&self.key).unwrap()
+        self.mesh
+            .as_ref()
+            .as_storage::<Vertex<G>>()
+            .get(&self.key)
+            .unwrap()
     }
 }
 
@@ -153,7 +155,11 @@ where
     G: Geometry,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.mesh.as_mut().vertices.get_mut(&self.key).unwrap()
+        self.mesh
+            .as_mut()
+            .as_storage_mut::<Vertex<G>>()
+            .get_mut(&self.key)
+            .unwrap()
     }
 }
 
@@ -279,10 +285,24 @@ where
 
     fn next(&mut self) -> Option<EdgeKey> {
         self.edge
-            .map(|outgoing| self.vertex.mesh.as_ref().edges.get(&outgoing).unwrap())
+            .map(|outgoing| {
+                self.vertex
+                    .mesh
+                    .as_ref()
+                    .as_storage::<Edge<G>>()
+                    .get(&outgoing)
+                    .unwrap()
+            })
             .and_then(|outgoing| outgoing.opposite)
             .and_then(|incoming| {
-                let outgoing = self.vertex.mesh.as_ref().edges.get(&incoming).unwrap().next;
+                let outgoing = self
+                    .vertex
+                    .mesh
+                    .as_ref()
+                    .as_storage::<Edge<G>>()
+                    .get(&incoming)
+                    .unwrap()
+                    .next;
                 self.breadcrumb.map(|_| {
                     if self.breadcrumb == outgoing {
                         self.breadcrumb = None;
@@ -328,7 +348,11 @@ where
                     // within the mesh should also be valid over the lifetime
                     // '`a'.
                     mem::transmute::<_, &'a mut Edge<G>>(
-                        self.vertex.mesh.edges.get_mut(&edge).unwrap(),
+                        self.vertex
+                            .mesh
+                            .as_storage_mut::<Edge<G>>()
+                            .get_mut(&edge)
+                            .unwrap(),
                     )
                 },
                 edge,
@@ -355,11 +379,15 @@ where
     }
 
     fn next(&mut self) -> Option<FaceKey> {
-        while let Some(edge) = self
-            .inner
-            .next()
-            .map(|edge| self.inner.vertex.mesh.as_ref().edges.get(&edge).unwrap())
-        {
+        while let Some(edge) = self.inner.next().map(|edge| {
+            self.inner
+                .vertex
+                .mesh
+                .as_ref()
+                .as_storage::<Edge<G>>()
+                .get(&edge)
+                .unwrap()
+        }) {
             if let Some(face) = edge.face {
                 return Some(face);
             }
@@ -409,7 +437,12 @@ where
                     // within the mesh should also be valid over the lifetime
                     // '`a'.
                     mem::transmute::<_, &'a mut Face<G>>(
-                        self.inner.vertex.mesh.faces.get_mut(&face).unwrap(),
+                        self.inner
+                            .vertex
+                            .mesh
+                            .as_storage_mut::<Face<G>>()
+                            .get_mut(&face)
+                            .unwrap(),
                     )
                 },
                 face,

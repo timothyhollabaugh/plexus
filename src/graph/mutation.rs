@@ -131,7 +131,9 @@ where
     G: 'a + Geometry,
 {
     pub fn insert_vertex(&mut self, geometry: G::Vertex) -> VertexKey {
-        self.mesh.vertices.insert(Vertex::new(geometry))
+        self.mesh
+            .as_storage_mut::<Vertex<G>>()
+            .insert(Vertex::new(geometry))
     }
 }
 
@@ -145,23 +147,23 @@ where
         vertices: (VertexKey, VertexKey),
         geometry: G::Edge,
     ) -> Result<EdgeKey, Error> {
-        let mesh = self.mesh.get_mut();
         let (a, b) = vertices;
         let ab = (a, b).into();
         let ba = (b, a).into();
+        let (vertices, edges, _) = self.mesh.get_mut().as_disjoint_storage_mut();
         // If the edge already exists, then fail. This ensures an important
         // invariant: edges may only have two adjacent faces. That is, a
         // half-edge may only have one associated face, at most one preceding
         // half-edge, at most one following half-edge, and may form at most one
         // closed loop.
-        if mesh.edges.contains_key(&ab) {
+        if edges.contains_key(&ab) {
             return Err(GraphError::TopologyConflict.into());
         }
         let vertex = {
-            if !mesh.vertices.contains_key(&b) {
+            if !vertices.contains_key(&b) {
                 return Err(GraphError::TopologyNotFound.into());
             }
-            match mesh.vertices.get_mut(&a) {
+            match vertices.get_mut(&a) {
                 Some(vertex) => vertex,
                 _ => {
                     return Err(GraphError::TopologyNotFound.into());
@@ -171,11 +173,11 @@ where
         let mut edge = Edge::new(b, geometry);
         // This is the point of no return. The mesh has been mutated. Unwrap
         // results.
-        if let Some(opposite) = mesh.edges.get_mut(&ba) {
+        if let Some(opposite) = edges.get_mut(&ba) {
             edge.opposite = Some(ba);
             opposite.opposite = Some(ab);
         }
-        mesh.edges.insert_with_key(&ab, edge);
+        edges.insert_with_key(&ab, edge);
         vertex.edge = Some(ab);
         Ok(ab)
     }
@@ -217,7 +219,7 @@ where
         else {
             return Err(Error::from(GraphError::TopologyNotFound));
         }
-        Ok(self.mesh.edges.remove(&edge).unwrap())
+        Ok(self.mesh.as_storage_mut::<Edge<G>>().remove(&edge).unwrap())
     }
 
     fn remove_composite_edge(&mut self, edge: EdgeKey) -> Result<(Edge<G>, Edge<G>), Error> {
@@ -366,7 +368,10 @@ where
                     .0
             })
             .collect::<Vec<_>>();
-        let face = self.mesh.faces.insert(Face::new(edges[0], geometry.1));
+        let face = self
+            .mesh
+            .as_storage_mut::<Face<G>>()
+            .insert(Face::new(edges[0], geometry.1));
         self.connect_face_interior(&edges, face).unwrap();
         self.connect_face_exterior(&edges, (incoming, outgoing))
             .unwrap();
@@ -435,7 +440,7 @@ where
         for edge in edges {
             self.remove_composite_edge(edge).unwrap();
         }
-        Ok(self.mesh.faces.remove(&face).unwrap())
+        Ok(self.mesh.as_storage_mut::<Face<G>>().remove(&face).unwrap())
     }
 }
 
@@ -532,7 +537,10 @@ where
                     .0
             })
             .collect::<Vec<_>>();
-        let face = self.mesh.faces.insert(Face::new(edges[0], geometry.1));
+        let face = self
+            .mesh
+            .as_storage_mut::<Face<G>>()
+            .insert(Face::new(edges[0], geometry.1));
         if let Some(singularity) = singularity {
             let faces = self
                 .singularities
@@ -568,7 +576,7 @@ where
         for edge in edges {
             self.remove_composite_edge(edge).unwrap();
         }
-        Ok(self.mesh.faces.remove(&face).unwrap())
+        Ok(self.mesh.as_storage_mut::<Face<G>>().remove(&face).unwrap())
     }
 }
 

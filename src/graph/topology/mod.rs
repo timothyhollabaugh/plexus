@@ -12,8 +12,8 @@
 // for example. While `into` and immutable accessor functions are okay, mutable
 // accessor functions MUST yield orphans (or not exist at all).
 
-use geometry::{Attribute, Geometry};
-use graph::storage::OpaqueKey;
+use geometry::Geometry;
+use graph::storage::Topological;
 use graph::Mesh;
 
 mod edge;
@@ -35,11 +35,6 @@ pub type OrphanFaceMut<'a, G> = OrphanFaceView<'a, G>;
 pub type VertexRef<'a, G> = VertexView<&'a Mesh<G>, G>;
 pub type VertexMut<'a, G> = VertexView<&'a mut Mesh<G>, G>;
 pub type OrphanVertexMut<'a, G> = OrphanVertexView<'a, G>;
-
-pub trait Topological {
-    type Key: OpaqueKey;
-    type Attribute: Attribute;
-}
 
 // TODO: The view traits could require `Deref` and replace the `Topology`
 //       associated type with `Target`. However, they are only used to abstract

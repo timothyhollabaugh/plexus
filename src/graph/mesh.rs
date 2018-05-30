@@ -17,10 +17,12 @@ use geometry::Geometry;
 use graph::geometry::FaceCentroid;
 use graph::mutation::{ModalMutation, Mutation};
 use graph::storage::alias::InnerKey;
-use graph::storage::{EdgeKey, FaceKey, Storage, VertexKey};
+use graph::storage::{
+    AsStorage, AsStorageMut, Bind, EdgeKey, FaceKey, Storage, Topological, VertexKey,
+};
 use graph::topology::{
     EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut, OrphanVertexMut, OrphanView,
-    Topological, VertexMut, VertexRef, View,
+    VertexMut, VertexRef, View,
 };
 use graph::{GraphError, Perimeter};
 use BoolExt;
@@ -199,6 +201,133 @@ pub type Connectivity = HashMap<VertexKey, Vec<EdgeKey>>;
 
 pub type Singularity = (VertexKey, Vec<FaceKey>);
 
+/// Abstract and ephemeral core mesh storage.
+#[derive(Clone, Default)]
+pub struct Core<V = (), E = (), F = ()>(V, E, F);
+
+impl Core {
+    pub fn empty() -> Self {
+        Core((), (), ())
+    }
+}
+
+impl<V, E, F> Core<V, E, F> {
+    pub(in graph) fn as_storage<T>(&self) -> &Storage<T>
+    where
+        Self: AsStorage<T>,
+        T: Topological,
+    {
+        AsStorage::<T>::as_storage(self)
+    }
+
+    pub(in graph) fn as_storage_mut<T>(&mut self) -> &mut Storage<T>
+    where
+        Self: AsStorageMut<T>,
+        T: Topological,
+    {
+        AsStorageMut::<T>::as_storage_mut(self)
+    }
+}
+
+impl<V, E, F, G> AsStorage<Vertex<G>> for Core<V, E, F>
+where
+    V: AsStorage<Vertex<G>>,
+    G: Geometry,
+{
+    fn as_storage(&self) -> &Storage<Vertex<G>> {
+        self.0.as_storage()
+    }
+}
+
+impl<V, E, F, G> AsStorage<Edge<G>> for Core<V, E, F>
+where
+    E: AsStorage<Edge<G>>,
+    G: Geometry,
+{
+    fn as_storage(&self) -> &Storage<Edge<G>> {
+        self.1.as_storage()
+    }
+}
+
+impl<V, E, F, G> AsStorage<Face<G>> for Core<V, E, F>
+where
+    F: AsStorage<Face<G>>,
+    G: Geometry,
+{
+    fn as_storage(&self) -> &Storage<Face<G>> {
+        self.2.as_storage()
+    }
+}
+
+impl<V, E, F, G> AsStorageMut<Vertex<G>> for Core<V, E, F>
+where
+    V: AsStorageMut<Vertex<G>>,
+    G: Geometry,
+{
+    fn as_storage_mut(&mut self) -> &mut Storage<Vertex<G>> {
+        self.0.as_storage_mut()
+    }
+}
+
+impl<V, E, F, G> AsStorageMut<Edge<G>> for Core<V, E, F>
+where
+    E: AsStorageMut<Edge<G>>,
+    G: Geometry,
+{
+    fn as_storage_mut(&mut self) -> &mut Storage<Edge<G>> {
+        self.1.as_storage_mut()
+    }
+}
+
+impl<V, E, F, G> AsStorageMut<Face<G>> for Core<V, E, F>
+where
+    F: AsStorageMut<Face<G>>,
+    G: Geometry,
+{
+    fn as_storage_mut(&mut self) -> &mut Storage<Face<G>> {
+        self.2.as_storage_mut()
+    }
+}
+
+impl<V, E, F, G> Bind<Vertex<G>, V> for Core<(), E, F>
+where
+    V: AsStorage<Vertex<G>>,
+    G: Geometry,
+{
+    type Output = Core<V, E, F>;
+
+    fn bind(self, vertices: V) -> Self::Output {
+        let Core(_, edges, faces) = self;
+        Core(vertices, edges, faces)
+    }
+}
+
+impl<V, E, F, G> Bind<Edge<G>, E> for Core<V, (), F>
+where
+    E: AsStorage<Edge<G>>,
+    G: Geometry,
+{
+    type Output = Core<V, E, F>;
+
+    fn bind(self, edges: E) -> Self::Output {
+        let Core(vertices, _, faces) = self;
+        Core(vertices, edges, faces)
+    }
+}
+
+impl<V, E, F, G> Bind<Face<G>, F> for Core<V, E, ()>
+where
+    F: AsStorage<Face<G>>,
+    G: Geometry,
+{
+    type Output = Core<V, E, F>;
+
+    fn bind(self, faces: F) -> Self::Output {
+        let Core(vertices, edges, _) = self;
+        Core(vertices, edges, faces)
+    }
+}
+
 /// Half-edge graph representation of a mesh.
 ///
 /// Provides topological data in the form of vertices, half-edges, and faces. A
@@ -209,13 +338,23 @@ pub type Singularity = (VertexKey, Vec<FaceKey>);
 /// manipulate topology and geometry.
 ///
 /// See the module documentation for more details.
-pub struct Mesh<G = ()>
+pub type Mesh<G = ()> = Core<Storage<Vertex<G>>, Storage<Edge<G>>, Storage<Face<G>>>;
+
+/// Storage.
+impl<G> Mesh<G>
 where
     G: Geometry,
 {
-    pub(in graph) vertices: Storage<Vertex<G>>,
-    pub(in graph) edges: Storage<Edge<G>>,
-    pub(in graph) faces: Storage<Face<G>>,
+    pub(in graph) fn as_disjoint_storage_mut(
+        &mut self,
+    ) -> (
+        &mut Storage<Vertex<G>>,
+        &mut Storage<Edge<G>>,
+        &mut Storage<Face<G>>,
+    ) {
+        let Core(ref mut vertices, ref mut edges, ref mut faces) = self;
+        (vertices, edges, faces)
+    }
 }
 
 impl<G> Mesh<G>
@@ -232,11 +371,7 @@ where
     /// let mut mesh = Mesh::<()>::new();
     /// ```
     pub fn new() -> Self {
-        Mesh {
-            vertices: Storage::new(),
-            edges: Storage::new(),
-            faces: Storage::new(),
-        }
+        Self::default()
     }
 
     /// Creates an empty `Mesh`.
@@ -244,11 +379,7 @@ where
     /// Underlying storage has zero capacity and does not allocate until the
     /// first insertion.
     pub(in graph) fn empty() -> Self {
-        Mesh {
-            vertices: Storage::empty(),
-            edges: Storage::empty(),
-            faces: Storage::empty(),
-        }
+        Core(Storage::empty(), Storage::empty(), Storage::empty())
     }
 
     /// Creates a `Mesh` from raw index and vertex buffers. The arity of the
@@ -314,32 +445,32 @@ where
 
     /// Gets the number of vertices in the mesh.
     pub fn vertex_count(&self) -> usize {
-        self.vertices.len()
+        self.as_storage::<Vertex<G>>().len()
     }
 
     /// Gets an immutable view of the vertex with the given key.
     pub fn vertex(&self, vertex: VertexKey) -> Option<VertexRef<G>> {
-        self.vertices
+        self.as_storage::<Vertex<G>>()
             .get(&vertex)
             .map(|_| VertexRef::new(self, vertex))
     }
 
     /// Gets a mutable view of the vertex with the given key.
     pub fn vertex_mut(&mut self, vertex: VertexKey) -> Option<VertexMut<G>> {
-        self.vertices
+        self.as_storage_mut::<Vertex<G>>()
             .contains_key(&vertex)
             .into_some(VertexMut::new(self, vertex))
     }
 
     pub(in graph) fn orphan_vertex_mut(&mut self, vertex: VertexKey) -> Option<OrphanVertexMut<G>> {
-        self.vertices
+        self.as_storage_mut::<Vertex<G>>()
             .get_mut(&vertex)
             .map(|topology| OrphanVertexMut::new(topology, vertex))
     }
 
     /// Gets an iterator of immutable views over the vertices in the mesh.
     pub fn vertices(&self) -> impl Iterator<Item = VertexRef<G>> {
-        Iter::new(self, self.vertices.iter())
+        Iter::new(self, self.as_storage::<Vertex<G>>().iter())
     }
 
     /// Gets an iterator of orphan views over the vertices in the mesh.
@@ -348,35 +479,37 @@ where
     /// For topological mutations, collect the necessary keys and use
     /// `vertex_mut` instead.
     pub fn vertices_mut(&mut self) -> impl Iterator<Item = OrphanVertexMut<G>> {
-        IterMut::new(self.vertices.iter_mut())
+        IterMut::new(self.as_storage_mut::<Vertex<G>>().iter_mut())
     }
 
     /// Gets the number of edges in the mesh.
     pub fn edge_count(&self) -> usize {
-        self.edges.len()
+        self.as_storage::<Edge<G>>().len()
     }
 
     /// Gets an immutable view of the edge with the given key.
     pub fn edge(&self, edge: EdgeKey) -> Option<EdgeRef<G>> {
-        self.edges.get(&edge).map(|_| EdgeRef::new(self, edge))
+        self.as_storage::<Edge<G>>()
+            .get(&edge)
+            .map(|_| EdgeRef::new(self, edge))
     }
 
     /// Gets a mutable view of the edge with the given key.
     pub fn edge_mut(&mut self, edge: EdgeKey) -> Option<EdgeMut<G>> {
-        self.edges
+        self.as_storage_mut::<Edge<G>>()
             .contains_key(&edge)
             .into_some(EdgeMut::new(self, edge))
     }
 
     pub(in graph) fn orphan_edge_mut(&mut self, edge: EdgeKey) -> Option<OrphanEdgeMut<G>> {
-        self.edges
+        self.as_storage_mut::<Edge<G>>()
             .get_mut(&edge)
             .map(|topology| OrphanEdgeMut::new(topology, edge))
     }
 
     /// Gets an iterator of immutable views over the edges in the mesh.
     pub fn edges(&self) -> impl Iterator<Item = EdgeRef<G>> {
-        Iter::new(self, self.edges.iter())
+        Iter::new(self, self.as_storage::<Edge<G>>().iter())
     }
 
     /// Gets an iterator of orphan views over the edges in the mesh.
@@ -385,35 +518,37 @@ where
     /// For topological mutations, collect the necessary keys and use
     /// `edge_mut` instead.
     pub fn edges_mut(&mut self) -> impl Iterator<Item = OrphanEdgeMut<G>> {
-        IterMut::new(self.edges.iter_mut())
+        IterMut::new(self.as_storage_mut::<Edge<G>>().iter_mut())
     }
 
     /// Gets the number of faces in the mesh.
     pub fn face_count(&self) -> usize {
-        self.faces.len()
+        self.as_storage::<Face<G>>().len()
     }
 
     /// Gets an immutable view of the face with the given key.
     pub fn face(&self, face: FaceKey) -> Option<FaceRef<G>> {
-        self.faces.get(&face).map(|_| FaceRef::new(self, face))
+        self.as_storage::<Face<G>>()
+            .get(&face)
+            .map(|_| FaceRef::new(self, face))
     }
 
     /// Gets a mutable view of the face with the given key.
     pub fn face_mut(&mut self, face: FaceKey) -> Option<FaceMut<G>> {
-        self.faces
+        self.as_storage_mut::<Face<G>>()
             .contains_key(&face)
             .into_some(FaceMut::new(self, face))
     }
 
     pub(in graph) fn orphan_face_mut(&mut self, face: FaceKey) -> Option<OrphanFaceMut<G>> {
-        self.faces
+        self.as_storage_mut::<Face<G>>()
             .get_mut(&face)
             .map(|topology| OrphanFaceMut::new(topology, face))
     }
 
     /// Gets an iterator of immutable views over the faces in the mesh.
     pub fn faces(&self) -> impl Iterator<Item = FaceRef<G>> {
-        Iter::new(self, self.faces.iter())
+        Iter::new(self, self.as_storage::<Face<G>>().iter())
     }
 
     /// Gets an iterator of orphan views over the faces in the mesh.
@@ -422,7 +557,7 @@ where
     /// For topological mutations, collect the necessary keys and use
     /// `face_mut` instead.
     pub fn faces_mut(&mut self) -> impl Iterator<Item = OrphanFaceMut<G>> {
-        IterMut::new(self.faces.iter_mut())
+        IterMut::new(self.as_storage_mut::<Face<G>>().iter_mut())
     }
 
     /// Triangulates the mesh, tesselating all faces into triangles.
@@ -431,7 +566,7 @@ where
         G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
     {
         let faces = self
-            .faces
+            .as_storage::<Face<G>>()
             .keys()
             .map(|key| FaceKey::from(*key))
             .collect::<Vec<_>>();
@@ -691,16 +826,12 @@ where
     H: Geometry,
 {
     fn from_interior_geometry(mesh: Mesh<H>) -> Self {
-        let Mesh {
-            vertices,
-            edges,
-            faces,
-        } = mesh;
-        Mesh {
-            vertices: vertices.map_values_into(|vertex| vertex.into_interior_geometry()),
-            edges: edges.map_values_into(|edge| edge.into_interior_geometry()),
-            faces: faces.map_values_into(|face| face.into_interior_geometry()),
-        }
+        let Core(vertices, edges, faces) = mesh;
+        Core(
+            vertices.map_values_into(|vertex| vertex.into_interior_geometry()),
+            edges.map_values_into(|edge| edge.into_interior_geometry()),
+            faces.map_values_into(|face| face.into_interior_geometry()),
+        )
     }
 }
 

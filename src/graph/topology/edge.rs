@@ -9,10 +9,8 @@ use graph::geometry::alias::{ScaledEdgeLateral, VertexPosition};
 use graph::geometry::{EdgeLateral, EdgeMidpoint};
 use graph::mesh::{Edge, Face, Mesh, Vertex};
 use graph::mutation::{ModalMutation, Mutation};
-use graph::storage::{EdgeKey, FaceKey, VertexKey};
-use graph::topology::{
-    FaceView, OrphanFaceView, OrphanVertexView, OrphanView, Topological, VertexView, View,
-};
+use graph::storage::{EdgeKey, FaceKey, Topological, VertexKey};
+use graph::topology::{FaceView, OrphanFaceView, OrphanVertexView, OrphanView, VertexView, View};
 use graph::{GraphError, Perimeter};
 
 /// Do **not** use this type directly. Use `EdgeRef` and `EdgeMut` instead.
@@ -371,7 +369,11 @@ where
     type Target = Edge<G>;
 
     fn deref(&self) -> &Self::Target {
-        self.mesh.as_ref().edges.get(&self.key).unwrap()
+        self.mesh
+            .as_ref()
+            .as_storage::<Edge<G>>()
+            .get(&self.key)
+            .unwrap()
     }
 }
 
@@ -381,7 +383,11 @@ where
     G: Geometry,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.mesh.as_mut().edges.get_mut(&self.key).unwrap()
+        self.mesh
+            .as_mut()
+            .as_storage_mut::<Edge<G>>()
+            .get_mut(&self.key)
+            .unwrap()
     }
 }
 
@@ -539,7 +545,10 @@ where
                     // within the mesh should also be valid over the lifetime
                     // '`a'.
                     mem::transmute::<_, &'a mut Vertex<G>>(
-                        self.mesh.vertices.get_mut(&vertex).unwrap(),
+                        self.mesh
+                            .as_storage_mut::<Vertex<G>>()
+                            .get_mut(&vertex)
+                            .unwrap(),
                     )
                 },
                 vertex,
@@ -603,7 +612,12 @@ where
                     // lifetime `'a`. Therefore, the (disjoint) geometry data
                     // within the mesh should also be valid over the lifetime
                     // '`a'.
-                    mem::transmute::<_, &'a mut Face<G>>(self.mesh.faces.get_mut(&face).unwrap())
+                    mem::transmute::<_, &'a mut Face<G>>(
+                        self.mesh
+                            .as_storage_mut::<Face<G>>()
+                            .get_mut(&face)
+                            .unwrap(),
+                    )
                 },
                 face,
             )

@@ -4,7 +4,12 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use self::alias::*;
-use graph::topology::Topological;
+use geometry::Attribute;
+
+pub trait Topological {
+    type Key: OpaqueKey;
+    type Attribute: Attribute;
+}
 
 pub trait ImplicitKey: Copy + Default + Sized {
     fn into_next_key(self) -> Self;
@@ -125,6 +130,41 @@ impl From<FaceKey> for Key {
     }
 }
 
+pub trait AsStorage<T>
+where
+    T: Topological,
+{
+    fn as_storage(&self) -> &Storage<T>;
+}
+
+impl<'a, T, U> AsStorage<T> for &'a U
+where
+    T: Topological,
+    U: AsStorage<T>,
+{
+    fn as_storage(&self) -> &Storage<T> {
+        <U as AsStorage<T>>::as_storage(self)
+    }
+}
+
+pub trait AsStorageMut<T>
+where
+    T: Topological,
+{
+    fn as_storage_mut(&mut self) -> &mut Storage<T>;
+}
+
+impl<'a, T, U> AsStorageMut<T> for &'a mut U
+where
+    T: Topological,
+    U: AsStorageMut<T>,
+{
+    fn as_storage_mut(&mut self) -> &mut Storage<T> {
+        <U as AsStorageMut<T>>::as_storage_mut(self)
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct Storage<T>
 where
     T: Topological,
@@ -217,6 +257,34 @@ where
         self.implicit = self.implicit.into_next_key();
         key.into()
     }
+}
+
+impl<T> AsStorage<T> for Storage<T>
+where
+    T: Topological,
+{
+    fn as_storage(&self) -> &Storage<T> {
+        self
+    }
+}
+
+impl<T> AsStorageMut<T> for Storage<T>
+where
+    T: Topological,
+{
+    fn as_storage_mut(&mut self) -> &mut Storage<T> {
+        self
+    }
+}
+
+pub trait Bind<T, M>
+where
+    T: Topological,
+    M: AsStorage<T>,
+{
+    type Output;
+
+    fn bind(self, source: M) -> Self::Output;
 }
 
 pub mod alias {

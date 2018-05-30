@@ -8,10 +8,9 @@ use graph::geometry::alias::{ScaledFaceNormal, VertexPosition};
 use graph::geometry::{FaceCentroid, FaceNormal};
 use graph::mesh::{Edge, Face, Mesh, Vertex};
 use graph::mutation::{ModalMutation, Mutation};
-use graph::storage::{EdgeKey, FaceKey, VertexKey};
+use graph::storage::{EdgeKey, FaceKey, Topological, VertexKey};
 use graph::topology::{
-    edge, EdgeKeyTopology, EdgeView, OrphanEdgeView, OrphanVertexView, OrphanView, Topological,
-    VertexView, View,
+    edge, EdgeKeyTopology, EdgeView, OrphanEdgeView, OrphanVertexView, OrphanView, VertexView, View,
 };
 use graph::{GraphError, Perimeter};
 
@@ -191,7 +190,11 @@ where
     type Target = <Self as View<M, G>>::Topology;
 
     fn deref(&self) -> &Self::Target {
-        self.mesh.as_ref().faces.get(&self.key).unwrap()
+        self.mesh
+            .as_ref()
+            .as_storage::<Face<G>>()
+            .get(&self.key)
+            .unwrap()
     }
 }
 
@@ -201,7 +204,11 @@ where
     G: Geometry,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.mesh.as_mut().faces.get_mut(&self.key).unwrap()
+        self.mesh
+            .as_mut()
+            .as_storage_mut::<Face<G>>()
+            .get_mut(&self.key)
+            .unwrap()
     }
 }
 
@@ -365,7 +372,15 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         <EdgeCirculator<_, G> as Iterator>::next(&mut self.inner)
-            .map(|edge| self.inner.face.mesh.edges.get(&edge.key()).unwrap().vertex)
+            .map(|edge| {
+                self.inner
+                    .face
+                    .mesh
+                    .as_storage::<Edge<G>>()
+                    .get(&edge.key())
+                    .unwrap()
+                    .vertex
+            })
             .map(|vertex| {
                 OrphanVertexView::new(
                     unsafe {
@@ -380,7 +395,12 @@ where
                         // within the mesh should also be valid over the lifetime
                         // '`a'.
                         mem::transmute::<_, &'a mut Vertex<G>>(
-                            self.inner.face.mesh.vertices.get_mut(&vertex).unwrap(),
+                            self.inner
+                                .face
+                                .mesh
+                                .as_storage_mut::<Vertex<G>>()
+                                .get_mut(&vertex)
+                                .unwrap(),
                         )
                     },
                     vertex,
@@ -415,7 +435,14 @@ where
 
     fn next(&mut self) -> Option<EdgeKey> {
         self.edge.and_then(|edge| {
-            let next = self.face.mesh.as_ref().edges.get(&edge).unwrap().next;
+            let next = self
+                .face
+                .mesh
+                .as_ref()
+                .as_storage::<Edge<G>>()
+                .get(&edge)
+                .unwrap()
+                .next;
             self.breadcrumb.map(|_| {
                 if self.breadcrumb == next {
                     self.breadcrumb = None;
@@ -461,7 +488,11 @@ where
                     // within the mesh should also be valid over the lifetime
                     // '`a'.
                     mem::transmute::<_, &'a mut Edge<G>>(
-                        self.face.mesh.edges.get_mut(&edge).unwrap(),
+                        self.face
+                            .mesh
+                            .as_storage_mut::<Edge<G>>()
+                            .get_mut(&edge)
+                            .unwrap(),
                     )
                 },
                 edge,
@@ -488,14 +519,26 @@ where
     }
 
     fn next(&mut self) -> Option<FaceKey> {
-        while let Some(edge) = self
-            .inner
-            .next()
-            .map(|edge| self.inner.face.mesh.as_ref().edges.get(&edge).unwrap())
-        {
+        while let Some(edge) = self.inner.next().map(|edge| {
+            self.inner
+                .face
+                .mesh
+                .as_ref()
+                .as_storage::<Edge<G>>()
+                .get(&edge)
+                .unwrap()
+        }) {
             if let Some(face) = edge
                 .opposite
-                .map(|opposite| self.inner.face.mesh.as_ref().edges.get(&opposite).unwrap())
+                .map(|opposite| {
+                    self.inner
+                        .face
+                        .mesh
+                        .as_ref()
+                        .as_storage::<Edge<G>>()
+                        .get(&opposite)
+                        .unwrap()
+                })
                 .and_then(|opposite| opposite.face)
             {
                 return Some(face);
@@ -546,7 +589,12 @@ where
                     // within the mesh should also be valid over the lifetime
                     // '`a'.
                     mem::transmute::<_, &'a mut Face<G>>(
-                        self.inner.face.mesh.faces.get_mut(&face).unwrap(),
+                        self.inner
+                            .face
+                            .mesh
+                            .as_storage_mut::<Face<G>>()
+                            .get_mut(&face)
+                            .unwrap(),
                     )
                 },
                 face,
