@@ -12,6 +12,8 @@
 // for example. While `into` and immutable accessor functions are okay, mutable
 // accessor functions MUST yield orphans (or not exist at all).
 
+use std::marker::PhantomData;
+
 use geometry::Geometry;
 use graph::storage::Topological;
 use graph::Mesh;
@@ -19,6 +21,8 @@ use graph::Mesh;
 mod edge;
 mod face;
 mod vertex;
+
+pub mod test; // TODO:
 
 pub use self::edge::{EdgeKeyTopology, EdgeView, OrphanEdgeView};
 pub use self::face::{FaceKeyTopology, FaceView, OrphanFaceView};
@@ -48,7 +52,7 @@ where
 {
     type Topology: Topological;
 
-    fn from_mesh(mesh: M, key: <Self::Topology as Topological>::Key) -> Self;
+    fn from_mesh(key: <Self::Topology as Topological>::Key, mesh: M) -> Self;
 }
 
 // Orphan views do not abstract over mutability of the topology they reference,
@@ -61,7 +65,83 @@ where
     type Topology: Topological;
 
     fn from_topology(
-        topology: &'a mut Self::Topology,
         key: <Self::Topology as Topological>::Key,
+        topology: &'a mut Self::Topology,
     ) -> Self;
+}
+
+trait IteratorExt: Iterator + Sized {
+    fn map_with_ref<F, R>(self, f: F) -> MapWithRef<Self, F, R>
+    where
+        F: FnMut(&Self, Self::Item) -> R,
+    {
+        MapWithRef {
+            input: self,
+            f,
+            phantom: PhantomData,
+        }
+    }
+
+    fn map_with_mut<F, R>(self, f: F) -> MapWithMut<Self, F, R>
+    where
+        F: FnMut(&mut Self, Self::Item) -> R,
+    {
+        MapWithMut {
+            input: self,
+            f,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<I> IteratorExt for I
+where
+    I: Iterator + Sized,
+{
+}
+
+struct MapWithRef<I, F, R>
+where
+    I: Iterator,
+    F: FnMut(&I, I::Item) -> R,
+{
+    input: I,
+    f: F,
+    phantom: PhantomData<R>,
+}
+
+impl<I, F, R> Iterator for MapWithRef<I, F, R>
+where
+    I: Iterator,
+    F: FnMut(&I, I::Item) -> R,
+{
+    type Item = R;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.input.next();
+        item.map(|item| (self.f)(&self.input, item))
+    }
+}
+
+struct MapWithMut<I, F, R>
+where
+    I: Iterator,
+    F: FnMut(&mut I, I::Item) -> R,
+{
+    input: I,
+    f: F,
+    phantom: PhantomData<R>,
+}
+
+impl<I, F, R> Iterator for MapWithMut<I, F, R>
+where
+    I: Iterator,
+    F: FnMut(&mut I, I::Item) -> R,
+{
+    type Item = R;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.input.next();
+        item.map(|item| (self.f)(&mut self.input, item))
+    }
 }

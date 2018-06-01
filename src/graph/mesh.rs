@@ -564,8 +564,7 @@ where
     where
         G: FaceCentroid<Centroid = <G as Geometry>::Vertex> + Geometry,
     {
-        let faces = self
-            .as_storage::<Face<G>>()
+        let faces = <Self as AsStorage<Face<G>>>::as_storage(self)
             .keys()
             .map(|key| FaceKey::from(*key))
             .collect::<Vec<_>>();
@@ -923,7 +922,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         self.input
             .next()
-            .map(|entry| T::from_mesh(self.mesh, (*entry.0).into()))
+            .map(|entry| T::from_mesh((*entry.0).into(), self.mesh))
     }
 }
 
@@ -961,19 +960,16 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         self.input.next().map(|entry| {
-            T::from_topology(
-                unsafe {
-                    use std::mem;
+            T::from_topology((*entry.0).into(), unsafe {
+                use std::mem;
 
-                    // This should be safe, because the use of this iterator
-                    // requires a mutable borrow of the source mesh with
-                    // lifetime `'a`. Therefore, the (disjoint) geometry data
-                    // within the mesh should also be valid over the lifetime
-                    // '`a'.
-                    mem::transmute::<_, &'a mut T::Topology>(entry.1)
-                },
-                (*entry.0).into(),
-            )
+                // This should be safe, because the use of this iterator
+                // requires a mutable borrow of the source mesh with
+                // lifetime `'a`. Therefore, the (disjoint) geometry data
+                // within the mesh should also be valid over the lifetime
+                // '`a'.
+                mem::transmute::<_, &'a mut T::Topology>(entry.1)
+            })
         })
     }
 }

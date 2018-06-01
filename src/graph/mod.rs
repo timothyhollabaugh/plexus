@@ -148,7 +148,7 @@ pub use self::view::{
 //       in documentation. Client code should not interact with these types.
 //       See: https://github.com/rust-lang/rust/issues/39437
 pub use self::view::{
-    EdgeView, FaceView, OrphanEdgeView, OrphanFaceView, OrphanVertexView, VertexView,
+    test, EdgeView, FaceView, OrphanEdgeView, OrphanFaceView, OrphanVertexView, VertexView,
 };
 
 #[derive(Debug, Fail)]

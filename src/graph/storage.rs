@@ -147,6 +147,16 @@ where
     }
 }
 
+impl<'a, T, U> AsStorage<T> for &'a mut U
+where
+    T: Topological,
+    U: AsStorage<T>,
+{
+    fn as_storage(&self) -> &Storage<T> {
+        <U as AsStorage<T>>::as_storage(self)
+    }
+}
+
 pub trait AsStorageMut<T>
 where
     T: Topological,

@@ -191,7 +191,7 @@ where
 {
     type Topology = Vertex<G>;
 
-    fn from_mesh(mesh: M, key: <Self::Topology as Topological>::Key) -> Self {
+    fn from_mesh(key: <Self::Topology as Topological>::Key, mesh: M) -> Self {
         VertexView::new(mesh, key)
     }
 }
@@ -252,8 +252,8 @@ where
     type Topology = Vertex<G>;
 
     fn from_topology(
-        topology: &'a mut Self::Topology,
         key: <Self::Topology as Topological>::Key,
+        topology: &'a mut Self::Topology,
     ) -> Self {
         OrphanVertexView::new(topology, key)
     }
