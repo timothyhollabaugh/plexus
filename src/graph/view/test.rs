@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::mem;
 use std::ops::{Deref, DerefMut};
 
 use geometry::Geometry;
@@ -170,7 +171,7 @@ where
         let key = self.edge;
         let storage = &self.storage;
         EdgeCirculator::new(key, storage)
-            .map_with_ref(|edges, key| EdgeView::new(key, edges.storage))
+            .map_with_ref(|circulator, key| EdgeView::new(key, circulator.storage))
     }
 }
 
@@ -183,7 +184,7 @@ where
         let key = self.edge;
         let storage = &self.storage;
         FaceCirculator::from(EdgeCirculator::new(key, storage))
-            .map_with_ref(|faces, key| FaceView::new(key, faces.input.storage))
+            .map_with_ref(|circulator, key| FaceView::new(key, circulator.input.storage))
     }
 }
 
@@ -194,21 +195,13 @@ where
 {
     pub fn incoming_orphan_edges<'a>(&'a mut self) -> impl Iterator<Item = OrphanEdgeView<'a, G>> {
         let key = self.edge;
-        EdgeCirculator::new(key, &mut self.storage).map_with_mut(|edges, key| {
+        EdgeCirculator::new(key, &mut self.storage).map_with_mut(|circulator, key| {
             OrphanEdgeView::new(
                 unsafe {
-                    use std::mem;
-
-                    // There is no way to emit the anonymous lifetime from the
-                    // autoref of `as_storage_mut` and `get_mut` from this
-                    // function with the required relationship with `'a`.
-                    // However, this should be safe, because the use of this
-                    // iterator requires a mutable borrow of the source storage
-                    // with lifetime `'a`. Therefore, the (disjoint) geometry
-                    // data within the storage should also be valid over the
-                    // lifetime '`a'.
-                    mem::transmute::<_, &'a mut Edge<G>>(
-                        edges.storage.as_storage_mut().get_mut(&key).unwrap(),
+                    // Apply `'a` to the autoref from `as_storage_mut` and
+                    // `get_mut`.
+                    mem::transmute::<&'_ mut Edge<G>, &'a mut Edge<G>>(
+                        circulator.storage.as_storage_mut().get_mut(&key).unwrap(),
                     )
                 },
                 key,
@@ -227,13 +220,18 @@ where
     ) -> impl Iterator<Item = OrphanFaceView<'a, G>> {
         let key = self.edge;
         FaceCirculator::from(EdgeCirculator::new(key, &mut self.storage)).map_with_mut(
-            |faces, key| {
+            |circulator, key| {
                 OrphanFaceView::new(
                     unsafe {
-                        use std::mem;
-
-                        mem::transmute::<_, &'a mut Face<G>>(
-                            faces.input.storage.as_storage_mut().get_mut(&key).unwrap(),
+                        // Apply `'a` to the autoref from `as_storage_mut` and
+                        // `get_mut`.
+                        mem::transmute::<&'_ mut Face<G>, &'a mut Face<G>>(
+                            circulator
+                                .input
+                                .storage
+                                .as_storage_mut()
+                                .get_mut(&key)
+                                .unwrap(),
                         )
                     },
                     key,
