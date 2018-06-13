@@ -167,6 +167,12 @@ where
         EdgeView::new(key, storage)
     }
 
+    pub fn outgoing_edge(&self) -> EdgeView<&M, G> {
+        let key = self.edge.unwrap();
+        let storage = &self.storage;
+        EdgeView::new(key, storage)
+    }
+
     pub fn incoming_edges(&self) -> impl Iterator<Item = EdgeView<&M, G>> {
         let key = self.edge;
         let storage = &self.storage;
@@ -193,6 +199,17 @@ where
     M: AsStorage<Edge<G>> + AsStorageMut<Edge<G>> + AsStorage<Vertex<G>>,
     G: Geometry,
 {
+    pub fn outgoing_edge_mut(&mut self) -> EdgeView<&mut M, G> {
+        let key = self.edge.unwrap();
+        let storage = &mut self.storage;
+        EdgeView::new(key, storage)
+    }
+
+    pub fn outgoing_orphan_edge(&mut self) -> OrphanEdgeView<G> {
+        let key = self.edge.unwrap();
+        OrphanEdgeView::new(self.storage.as_storage_mut().get_mut(&key).unwrap(), key)
+    }
+
     pub fn incoming_orphan_edges<'a>(&'a mut self) -> impl Iterator<Item = OrphanEdgeView<'a, G>> {
         let key = self.edge;
         EdgeCirculator::new(key, &mut self.storage).map_with_mut(|circulator, key| {
