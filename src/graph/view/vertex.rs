@@ -109,7 +109,7 @@ where
 {
     pub(in graph) fn raw_outgoing_edge_mut(&mut self) -> Option<OrphanEdgeView<G>> {
         let edge = self.edge;
-        edge.map(move |edge| self.mesh.as_mut().orphan_edge_mut(edge).unwrap())
+        edge.map(move |edge| self.mesh.as_mut().orphan_edge(edge).unwrap())
     }
 }
 
@@ -196,7 +196,7 @@ where
     }
 }
 
-/// Do **not** use this type directly. Use `OrphanVertexMut` instead.
+/// Do **not** use this type directly. Use `OrphanVertex` instead.
 ///
 /// This type is only re-exported so that its members are shown in
 /// documentation. See this issue:

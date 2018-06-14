@@ -311,7 +311,7 @@ where
     }
 }
 
-/// Do **not** use this type directly. Use `OrphanVertexMut` instead.
+/// Do **not** use this type directly. Use `OrphanVertex` instead.
 ///
 /// This type is only re-exported so that its members are shown in
 /// documentation. See this issue:

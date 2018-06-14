@@ -215,24 +215,24 @@ where
 
     pub fn source_vertex_mut(&mut self) -> OrphanVertexView<G> {
         let (vertex, _) = self.key().to_vertex_keys();
-        self.mesh.as_mut().orphan_vertex_mut(vertex).unwrap()
+        self.mesh.as_mut().orphan_vertex(vertex).unwrap()
     }
 
     pub fn destination_vertex_mut(&mut self) -> OrphanVertexView<G> {
         let vertex = self.vertex;
-        self.mesh.as_mut().orphan_vertex_mut(vertex).unwrap()
+        self.mesh.as_mut().orphan_vertex(vertex).unwrap()
     }
 
     pub fn face_mut(&mut self) -> Option<OrphanFaceView<G>> {
         let face = self.face;
-        face.map(move |face| self.mesh.as_mut().orphan_face_mut(face).unwrap())
+        face.map(move |face| self.mesh.as_mut().orphan_face(face).unwrap())
     }
 
     pub fn boundary_edge_mut(&mut self) -> Option<OrphanEdgeView<G>> {
         use BoolExt;
 
         if self.is_boundary_edge() {
-            Some(self.mesh.as_mut().orphan_edge_mut(self.key).unwrap())
+            Some(self.mesh.as_mut().orphan_edge(self.key).unwrap())
         }
         else {
             self.opposite_edge()
@@ -273,17 +273,17 @@ where
 {
     pub(in graph) fn raw_opposite_edge_mut(&mut self) -> Option<OrphanEdgeView<G>> {
         let opposite = self.opposite;
-        opposite.map(move |opposite| self.mesh.as_mut().orphan_edge_mut(opposite).unwrap())
+        opposite.map(move |opposite| self.mesh.as_mut().orphan_edge(opposite).unwrap())
     }
 
     pub(in graph) fn raw_next_edge_mut(&mut self) -> Option<OrphanEdgeView<G>> {
         let next = self.next;
-        next.map(move |next| self.mesh.as_mut().orphan_edge_mut(next).unwrap())
+        next.map(move |next| self.mesh.as_mut().orphan_edge(next).unwrap())
     }
 
     pub(in graph) fn raw_previous_edge_mut(&mut self) -> Option<OrphanEdgeView<G>> {
         let previous = self.previous;
-        previous.map(move |previous| self.mesh.as_mut().orphan_edge_mut(previous).unwrap())
+        previous.map(move |previous| self.mesh.as_mut().orphan_edge(previous).unwrap())
     }
 }
 
@@ -424,7 +424,7 @@ where
     }
 }
 
-/// Do **not** use this type directly. Use `OrphanEdgeMut` instead.
+/// Do **not** use this type directly. Use `OrphanEdge` instead.
 ///
 /// This type is only re-exported so that its members are shown in
 /// documentation. See this issue:

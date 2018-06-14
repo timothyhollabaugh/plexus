@@ -21,7 +21,7 @@ use graph::storage::{
     AsStorage, AsStorageMut, Bind, EdgeKey, FaceKey, Storage, Topological, VertexKey,
 };
 use graph::view::{
-    EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdgeMut, OrphanFaceMut, OrphanVertexMut, OrphanView,
+    EdgeMut, EdgeRef, FaceMut, FaceRef, OrphanEdge, OrphanFace, OrphanVertex, OrphanView,
     VertexMut, VertexRef, View,
 };
 use graph::{GraphError, Perimeter};
@@ -461,10 +461,10 @@ where
             .into_some(VertexMut::new(self, vertex))
     }
 
-    pub(in graph) fn orphan_vertex_mut(&mut self, vertex: VertexKey) -> Option<OrphanVertexMut<G>> {
+    pub(in graph) fn orphan_vertex(&mut self, vertex: VertexKey) -> Option<OrphanVertex<G>> {
         self.as_storage_mut::<Vertex<G>>()
             .get_mut(&vertex)
-            .map(|topology| OrphanVertexMut::new(topology, vertex))
+            .map(|topology| OrphanVertex::new(topology, vertex))
     }
 
     /// Gets an iterator of immutable views over the vertices in the mesh.
@@ -477,7 +477,7 @@ where
     /// Because this only yields orphan views, only geometry can be mutated.
     /// For topological mutations, collect the necessary keys and use
     /// `vertex_mut` instead.
-    pub fn vertices_mut(&mut self) -> impl Iterator<Item = OrphanVertexMut<G>> {
+    pub fn orphan_vertices(&mut self) -> impl Iterator<Item = OrphanVertex<G>> {
         IterMut::new(self.as_storage_mut::<Vertex<G>>().iter_mut())
     }
 
@@ -500,10 +500,10 @@ where
             .into_some(EdgeMut::new(self, edge))
     }
 
-    pub(in graph) fn orphan_edge_mut(&mut self, edge: EdgeKey) -> Option<OrphanEdgeMut<G>> {
+    pub(in graph) fn orphan_edge(&mut self, edge: EdgeKey) -> Option<OrphanEdge<G>> {
         self.as_storage_mut::<Edge<G>>()
             .get_mut(&edge)
-            .map(|topology| OrphanEdgeMut::new(topology, edge))
+            .map(|topology| OrphanEdge::new(topology, edge))
     }
 
     /// Gets an iterator of immutable views over the edges in the mesh.
@@ -516,7 +516,7 @@ where
     /// Because this only yields orphan views, only geometry can be mutated.
     /// For topological mutations, collect the necessary keys and use
     /// `edge_mut` instead.
-    pub fn edges_mut(&mut self) -> impl Iterator<Item = OrphanEdgeMut<G>> {
+    pub fn orphan_edges(&mut self) -> impl Iterator<Item = OrphanEdge<G>> {
         IterMut::new(self.as_storage_mut::<Edge<G>>().iter_mut())
     }
 
@@ -539,10 +539,10 @@ where
             .into_some(FaceMut::new(self, face))
     }
 
-    pub(in graph) fn orphan_face_mut(&mut self, face: FaceKey) -> Option<OrphanFaceMut<G>> {
+    pub(in graph) fn orphan_face(&mut self, face: FaceKey) -> Option<OrphanFace<G>> {
         self.as_storage_mut::<Face<G>>()
             .get_mut(&face)
-            .map(|topology| OrphanFaceMut::new(topology, face))
+            .map(|topology| OrphanFace::new(topology, face))
     }
 
     /// Gets an iterator of immutable views over the faces in the mesh.
@@ -555,7 +555,7 @@ where
     /// Because this only yields orphan views, only geometry can be mutated.
     /// For topological mutations, collect the necessary keys and use
     /// `face_mut` instead.
-    pub fn faces_mut(&mut self) -> impl Iterator<Item = OrphanFaceMut<G>> {
+    pub fn orphan_faces(&mut self) -> impl Iterator<Item = OrphanFace<G>> {
         IterMut::new(self.as_storage_mut::<Face<G>>().iter_mut())
     }
 
@@ -1010,7 +1010,7 @@ mod tests {
             // edges. Traversal of topology should be possible.
             assert_eq!(4, vertex.incoming_edges().count());
         }
-        for mut vertex in mesh.vertices_mut() {
+        for mut vertex in mesh.orphan_vertices() {
             // Geometry should be mutable.
             vertex.geometry += Vector3::zero();
         }
@@ -1141,7 +1141,7 @@ mod tests {
             .polygons_with_position()
             .collect::<Mesh<ValueGeometry>>();
         let value = 3.14;
-        for mut face in mesh.faces_mut() {
+        for mut face in mesh.orphan_faces() {
             face.geometry = value;
         }
 

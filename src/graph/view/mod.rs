@@ -31,15 +31,15 @@ pub use self::vertex::{OrphanVertexView, VertexView};
 
 pub type EdgeRef<'a, G> = EdgeView<&'a Mesh<G>, G>;
 pub type EdgeMut<'a, G> = EdgeView<&'a mut Mesh<G>, G>;
-pub type OrphanEdgeMut<'a, G> = OrphanEdgeView<'a, G>;
+pub type OrphanEdge<'a, G> = OrphanEdgeView<'a, G>;
 
 pub type FaceRef<'a, G> = FaceView<&'a Mesh<G>, G>;
 pub type FaceMut<'a, G> = FaceView<&'a mut Mesh<G>, G>;
-pub type OrphanFaceMut<'a, G> = OrphanFaceView<'a, G>;
+pub type OrphanFace<'a, G> = OrphanFaceView<'a, G>;
 
 pub type VertexRef<'a, G> = VertexView<&'a Mesh<G>, G>;
 pub type VertexMut<'a, G> = VertexView<&'a mut Mesh<G>, G>;
-pub type OrphanVertexMut<'a, G> = OrphanVertexView<'a, G>;
+pub type OrphanVertex<'a, G> = OrphanVertexView<'a, G>;
 
 // TODO: The view traits could require `Deref` and replace the `Topology`
 //       associated type with `Target`. However, they are only used to abstract
