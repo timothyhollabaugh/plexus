@@ -4,9 +4,8 @@ use std::ops::{Deref, DerefMut};
 
 use geometry::Geometry;
 use graph::mesh::{Edge, Face, Vertex};
-use graph::storage::{
-    AsStorage, AsStorageMut, Bind, EdgeKey, FaceKey, Storage, Topological, VertexKey,
-};
+use graph::storage::convert::{AsStorage, AsStorageMut};
+use graph::storage::{Bind, EdgeKey, FaceKey, Storage, Topological, VertexKey};
 use graph::view::convert::{FromTopology, IntoView};
 use graph::view::{IteratorExt, OrphanEdgeView, OrphanFaceView};
 
