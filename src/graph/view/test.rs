@@ -3,11 +3,12 @@ use std::mem;
 use std::ops::{Deref, DerefMut};
 
 use geometry::Geometry;
-use graph::mesh::{Edge, Face, Mesh, Vertex};
+use graph::mesh::{Edge, Face, Vertex};
 use graph::storage::{
     AsStorage, AsStorageMut, Bind, EdgeKey, FaceKey, Storage, Topological, VertexKey,
 };
-use graph::view::{IteratorExt, OrphanEdgeView, OrphanFaceView, OrphanView, View};
+use graph::view::convert::{FromTopology, IntoView};
+use graph::view::{IteratorExt, OrphanEdgeView, OrphanFaceView};
 
 pub struct EdgeView<M, G>
 where
@@ -19,20 +20,6 @@ where
     phantom: PhantomData<G>,
 }
 
-impl<M, G> EdgeView<M, G>
-where
-    M: AsStorage<Edge<G>>,
-    G: Geometry,
-{
-    fn new(key: EdgeKey, storage: M) -> Self {
-        EdgeView {
-            key,
-            storage,
-            phantom: PhantomData,
-        }
-    }
-}
-
 impl<M, G> Deref for EdgeView<M, G>
 where
     M: AsStorage<Edge<G>>,
@@ -41,7 +28,22 @@ where
     type Target = Edge<G>;
 
     fn deref(&self) -> &Self::Target {
-        panic!()
+        self.storage.as_storage().get(&self.key).unwrap()
+    }
+}
+
+impl<M, G> FromTopology<(EdgeKey, M)> for EdgeView<M, G>
+where
+    M: AsStorage<Edge<G>>,
+    G: Geometry,
+{
+    fn from_topology(source: (EdgeKey, M)) -> Self {
+        let (key, storage) = source;
+        EdgeView {
+            key,
+            storage,
+            phantom: PhantomData,
+        }
     }
 }
 
@@ -55,12 +57,13 @@ where
     phantom: PhantomData<G>,
 }
 
-impl<M, G> FaceView<M, G>
+impl<M, G> FromTopology<(FaceKey, M)> for FaceView<M, G>
 where
     M: AsStorage<Face<G>>,
     G: Geometry,
 {
-    fn new(key: FaceKey, storage: M) -> Self {
+    fn from_topology(source: (FaceKey, M)) -> Self {
+        let (key, storage) = source;
         FaceView {
             key,
             storage,
@@ -77,7 +80,7 @@ where
     type Target = Face<G>;
 
     fn deref(&self) -> &Self::Target {
-        panic!()
+        self.storage.as_storage().get(&self.key).unwrap()
     }
 }
 
@@ -143,14 +146,6 @@ where
     M: AsStorage<Vertex<G>>,
     G: Geometry,
 {
-    pub(in graph) fn new(key: VertexKey, storage: M) -> Self {
-        VertexView {
-            key,
-            storage,
-            phantom: PhantomData,
-        }
-    }
-
     pub fn key(&self) -> VertexKey {
         self.key
     }
@@ -164,20 +159,20 @@ where
     pub fn into_outgoing_edge(self) -> EdgeView<M, G> {
         let key = self.edge.unwrap();
         let VertexView { storage, .. } = self;
-        EdgeView::new(key, storage)
+        (key, storage).into_view()
     }
 
     pub fn outgoing_edge(&self) -> EdgeView<&M, G> {
         let key = self.edge.unwrap();
         let storage = &self.storage;
-        EdgeView::new(key, storage)
+        (key, storage).into_view()
     }
 
     pub fn incoming_edges(&self) -> impl Iterator<Item = EdgeView<&M, G>> {
         let key = self.edge;
         let storage = &self.storage;
-        EdgeCirculator::new(key, storage)
-            .map_with_ref(|circulator, key| EdgeView::new(key, circulator.storage))
+        EdgeCirculator::from_topology((key, storage))
+            .map_with_ref(|circulator, key| (key, circulator.storage).into_view())
     }
 }
 
@@ -189,8 +184,8 @@ where
     pub fn neighboring_faces(&self) -> impl Iterator<Item = FaceView<&M, G>> {
         let key = self.edge;
         let storage = &self.storage;
-        FaceCirculator::from(EdgeCirculator::new(key, storage))
-            .map_with_ref(|circulator, key| FaceView::new(key, circulator.input.storage))
+        FaceCirculator::from(EdgeCirculator::from_topology((key, storage)))
+            .map_with_ref(|circulator, key| (key, circulator.input.storage).into_view())
     }
 }
 
@@ -202,7 +197,7 @@ where
     pub fn outgoing_edge_mut(&mut self) -> EdgeView<&mut M, G> {
         let key = self.edge.unwrap();
         let storage = &mut self.storage;
-        EdgeView::new(key, storage)
+        (key, storage).into_view()
     }
 
     pub fn outgoing_orphan_edge(&mut self) -> OrphanEdgeView<G> {
@@ -212,7 +207,7 @@ where
 
     pub fn incoming_orphan_edges<'a>(&'a mut self) -> impl Iterator<Item = OrphanEdgeView<'a, G>> {
         let key = self.edge;
-        EdgeCirculator::new(key, &mut self.storage).map_with_mut(|circulator, key| {
+        EdgeCirculator::from_topology((key, &mut self.storage)).map_with_mut(|circulator, key| {
             OrphanEdgeView::new(
                 unsafe {
                     // Apply `'a` to the autoref from `as_storage_mut` and
@@ -236,7 +231,7 @@ where
         &'a mut self,
     ) -> impl Iterator<Item = OrphanFaceView<'a, G>> {
         let key = self.edge;
-        FaceCirculator::from(EdgeCirculator::new(key, &mut self.storage)).map_with_mut(
+        FaceCirculator::from(EdgeCirculator::from_topology((key, &mut self.storage))).map_with_mut(
             |circulator, key| {
                 OrphanFaceView::new(
                     unsafe {
@@ -255,28 +250,6 @@ where
                 )
             },
         )
-    }
-}
-
-impl<M, G> Deref for VertexView<M, G>
-where
-    M: AsStorage<Vertex<G>>,
-    G: Geometry,
-{
-    type Target = Vertex<G>;
-
-    fn deref(&self) -> &Self::Target {
-        self.storage.as_storage().get(&self.key).unwrap()
-    }
-}
-
-impl<M, G> DerefMut for VertexView<M, G>
-where
-    M: AsStorage<Vertex<G>> + AsStorageMut<Vertex<G>>,
-    G: Geometry,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.storage.as_storage_mut().get_mut(&self.key).unwrap()
     }
 }
 
@@ -301,15 +274,40 @@ where
 {
 }
 
-impl<M, G> View<M, G> for VertexView<M, G>
+impl<M, G> Deref for VertexView<M, G>
 where
-    M: AsRef<Mesh<G>> + AsStorage<Vertex<G>>,
+    M: AsStorage<Vertex<G>>,
     G: Geometry,
 {
-    type Topology = Vertex<G>;
+    type Target = Vertex<G>;
 
-    fn from_mesh(key: <Self::Topology as Topological>::Key, mesh: M) -> Self {
-        VertexView::new(key, mesh)
+    fn deref(&self) -> &Self::Target {
+        self.storage.as_storage().get(&self.key).unwrap()
+    }
+}
+
+impl<M, G> DerefMut for VertexView<M, G>
+where
+    M: AsStorage<Vertex<G>> + AsStorageMut<Vertex<G>>,
+    G: Geometry,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.storage.as_storage_mut().get_mut(&self.key).unwrap()
+    }
+}
+
+impl<M, G> FromTopology<(VertexKey, M)> for VertexView<M, G>
+where
+    M: AsStorage<Vertex<G>>,
+    G: Geometry,
+{
+    fn from_topology(source: (VertexKey, M)) -> Self {
+        let (key, storage) = source;
+        VertexView {
+            key,
+            storage,
+            phantom: PhantomData,
+        }
     }
 }
 
@@ -330,13 +328,6 @@ impl<'a, G> OrphanVertexView<'a, G>
 where
     G: 'a + Geometry,
 {
-    pub(in graph) fn new(key: VertexKey, vertex: &'a mut Vertex<G>) -> Self {
-        OrphanVertexView {
-            key: key,
-            vertex: vertex,
-        }
-    }
-
     pub fn key(&self) -> VertexKey {
         self.key
     }
@@ -346,7 +337,7 @@ impl<'a, G> Deref for OrphanVertexView<'a, G>
 where
     G: 'a + Geometry,
 {
-    type Target = <Self as OrphanView<'a, G>>::Topology;
+    type Target = Vertex<G>;
 
     fn deref(&self) -> &Self::Target {
         &*self.vertex
@@ -362,17 +353,13 @@ where
     }
 }
 
-impl<'a, G> OrphanView<'a, G> for OrphanVertexView<'a, G>
+impl<'a, G> FromTopology<(VertexKey, &'a mut Vertex<G>)> for OrphanVertexView<'a, G>
 where
     G: 'a + Geometry,
 {
-    type Topology = Vertex<G>;
-
-    fn from_topology(
-        key: <Self::Topology as Topological>::Key,
-        topology: &'a mut Self::Topology,
-    ) -> Self {
-        OrphanVertexView::new(key, topology)
+    fn from_topology(source: (VertexKey, &'a mut Vertex<G>)) -> Self {
+        let (key, vertex) = source;
+        OrphanVertexView { key, vertex }
     }
 }
 
@@ -387,16 +374,17 @@ where
     phantom: PhantomData<&'a G>,
 }
 
-impl<'a, M, G> EdgeCirculator<'a, M, G>
+impl<'a, M, G> FromTopology<(Option<EdgeKey>, M)> for EdgeCirculator<'a, M, G>
 where
     M: 'a + AsStorage<Edge<G>>,
     G: 'a + Geometry,
 {
-    fn new(ab: Option<EdgeKey>, storage: M) -> Self {
+    fn from_topology(source: (Option<EdgeKey>, M)) -> Self {
+        let (key, storage) = source;
         EdgeCirculator {
             storage,
-            edge: ab,
-            breadcrumb: ab,
+            edge: key,
+            breadcrumb: key,
             phantom: PhantomData,
         }
     }

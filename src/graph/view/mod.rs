@@ -18,6 +18,7 @@ use geometry::Geometry;
 use graph::storage::Topological;
 use graph::Mesh;
 
+pub mod convert;
 mod edge;
 mod face;
 mod vertex;
